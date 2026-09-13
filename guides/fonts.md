@@ -23,7 +23,7 @@ iex> Default6x8.glyph(?A) |> Art.render({6, 8}) |> IO.puts()
 
 ## The built-in font
 
-`RasterExRatatui.Font.Default6x8` was drawn for a 400×300 e-ink badge. Text glyphs are 5×7 with a blank column and row for spacing; box drawing (`─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼`) and blocks (`█ ▀ ▄ ░ ▒ ▓`) fill the whole cell so they join. Braille, eighth blocks, and quadrants are generated, so `Canvas`, `Sparkline`, `BarChart`, `Gauge`, and `BigText` render faithfully. Anything else (accented letters, CJK, emoji, rounded or double box drawing) shows the hatched placeholder.
+`RasterExRatatui.Font.Default6x8` was drawn for a 400×300 e-ink badge. Text glyphs (all of printable ASCII, plus `° · • … ← ↑ → ↓ ✓ ✗ ▲ ▶ ▼ ◀ ○ ●`) are 5×7 with a blank column and row for spacing; box drawing (`─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼` and the rounded, heavy, and double corners and lines of every `Block` border type) and blocks (`█ ▀ ▄ ░ ▒ ▓`) fill the whole cell so they join. Braille, eighth blocks, and quadrants are generated, so `Canvas`, `Sparkline`, `BarChart`, `Gauge`, and `BigText` (up to its `:quadrant` size) render faithfully. Anything else (accented letters, CJK, emoji, box-drawing tees for heavy and double lines, `BigText`'s sextant and octant sizes) shows the hatched placeholder.
 
 ## Scale
 

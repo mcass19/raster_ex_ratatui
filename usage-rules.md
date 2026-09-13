@@ -62,7 +62,7 @@ frame = RasterExRatatui.Raster.frame(raster)
 
 ## Fonts
 
-- The default font is `RasterExRatatui.Font.Default6x8` (ASCII, light box drawing, blocks, braille, eighths, quadrants). Other characters render as a hatched placeholder.
+- The default font is `RasterExRatatui.Font.Default6x8` (printable ASCII, light box drawing plus every `Block` border type, blocks, braille, eighths, quadrants, a few arrows and marks). Other characters render as a hatched placeholder.
 - A font is a module implementing `RasterExRatatui.Font`: `cell_size/0` and `glyph/1` returning exactly `width * height` bits. Build glyphs at compile time with `RasterExRatatui.Font.Art.parse/3` and `RasterExRatatui.Font.Generated`.
 
 ## Device helpers

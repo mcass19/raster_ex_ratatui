@@ -158,6 +158,61 @@ defmodule RasterExRatatui.FontTest do
       refute Default6x8.has_glyph?(0x2764)
     end
 
+    test "covers all of printable ASCII, keeping the spacing column and row blank" do
+      for codepoint <- 0x20..0x7E do
+        assert Default6x8.has_glyph?(codepoint), "expected glyph for #{[codepoint]}"
+        rows = Default6x8.glyph(codepoint) |> Art.render({6, 8}) |> String.split("\n", trim: true)
+        assert Enum.all?(rows, &String.ends_with?(&1, ".")), "#{[codepoint]} inks column 5"
+        assert List.last(rows) == "......", "#{[codepoint]} inks row 7"
+      end
+    end
+
+    test "every Block border type draws without placeholders" do
+      alias ExRatatui.CellSession
+      alias ExRatatui.Layout.Rect
+      alias ExRatatui.Widgets.Block
+
+      session = CellSession.new(12, 4)
+
+      for border_type <- [:plain, :rounded, :double, :thick] do
+        block = %Block{borders: [:all], border_type: border_type}
+        :ok = CellSession.draw(session, [{block, %Rect{x: 0, y: 0, width: 12, height: 4}}])
+        %{cells: cells} = CellSession.take_cells(session)
+
+        for %{symbol: symbol} <- cells, symbol != "" do
+          assert Default6x8.has_glyph?(Font.codepoint(symbol)),
+                 "#{border_type} border uses #{symbol}, which has no glyph"
+        end
+      end
+
+      CellSession.close(session)
+    end
+
+    test "rounded corners meet the light lines at column 2 and row 3" do
+      corner = fn codepoint ->
+        Default6x8.glyph(codepoint) |> Art.render({6, 8}) |> String.split("\n", trim: true)
+      end
+
+      assert corner.(0x256D) |> Enum.at(3) |> String.ends_with?("#")
+      assert corner.(0x256D) |> List.last() |> String.at(2) == "#"
+      assert corner.(0x256E) |> Enum.at(3) |> String.starts_with?("#")
+      assert corner.(0x256F) |> hd() |> String.at(2) == "#"
+      assert corner.(0x2570) |> Enum.at(3) |> String.ends_with?("#")
+    end
+
+    test "heavy and double lines tile across cells" do
+      assert Default6x8.glyph(0x2501) == bytes([0, 0, 0, 0b11111100, 0b11111100, 0, 0, 0])
+      assert Default6x8.glyph(0x2503) == bytes(0b00110000, 8)
+      assert Default6x8.glyph(0x2550) == bytes([0, 0, 0b11111100, 0, 0b11111100, 0, 0, 0])
+      assert Default6x8.glyph(0x2551) == bytes(0b01010000, 8)
+    end
+
+    test "covers the common symbols" do
+      for codepoint <- ~c"°·•…←↑→↓✓✗▲▶▼◀○●" do
+        assert Default6x8.has_glyph?(codepoint), "expected glyph for #{[codepoint]}"
+      end
+    end
+
     test "codepoints/0 is sorted and matches has_glyph?/1" do
       codepoints = Default6x8.codepoints()
       assert codepoints == Enum.sort(codepoints)
