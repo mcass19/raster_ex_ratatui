@@ -1,0 +1,480 @@
+defmodule RasterExRatatui.Raster do
+  @moduledoc """
+  Turns `ExRatatui.CellSession` payloads into packed pixels for a panel.
+
+  A raster is a pure value: the panel geometry, a font, a pixel format, an integer scale, and the `RasterExRatatui.Grid` of the current frame. Feed it every snapshot or diff the session produces and it answers with the `RasterExRatatui.Patch` rectangles that changed, packed and ready to write.
+
+      raster = Raster.new(size: {400, 300}, font: Default6x8, format: Mono)
+      {cols, rows} = Raster.grid_size(raster)
+      session = CellSession.new(cols, rows, font_size: Raster.font_size(raster))
+
+      :ok = CellSession.draw(session, widgets)
+      {raster, patches} = Raster.apply(raster, CellSession.take_cells_diff(session))
+
+  ## Geometry
+
+  The effective cell is the font's cell times `scale:`; it is what the session must be created with as `font_size:`, so pixel-mode widgets render bitmaps at the panel's resolution. The grid is the panel size divided by the effective cell, rounded down; the leftover right and bottom strips (`margin/1`) are painted with the format's blank pixel.
+
+  ## Patches
+
+  `apply/2` rasterises only what changed:
+
+    * changed cells, one patch per contiguous run on a row
+    * cells under a pixel region are skipped: they arrive blank and the region paints over them
+    * when the region list changed, one patch per region (its bitmap scaled nearest-neighbour onto its cell rect, clipped to the grid), plus the cells an old region no longer covers
+    * on a full payload (the first diff, a snapshot, a resize), every row of cells, every region, and the margins
+
+  Patches must be written in list order. `frame/1` renders the whole panel as one buffer for panels that only take full frames; writing `apply/2`'s patches over the previous `frame/1` gives the next one.
+  """
+
+  alias ExRatatui.CellSession.{Cell, Diff, Region, Snapshot}
+  alias RasterExRatatui.{Font, Grid, Patch, PixelFormat}
+
+  @cache_limit 4096
+
+  @type size :: {pos_integer(), pos_integer()}
+
+  @type t :: %__MODULE__{
+          size: size(),
+          font: Font.t(),
+          format: PixelFormat.t(),
+          config: PixelFormat.config(),
+          scale: pos_integer(),
+          cell_size: size(),
+          grid_size: size(),
+          bytes_per_pixel: pos_integer(),
+          blank: binary(),
+          grid: Grid.t(),
+          cache: map()
+        }
+
+  @enforce_keys [
+    :size,
+    :font,
+    :format,
+    :config,
+    :scale,
+    :cell_size,
+    :grid_size,
+    :bytes_per_pixel,
+    :blank
+  ]
+  defstruct [
+    :size,
+    :font,
+    :format,
+    :config,
+    :scale,
+    :cell_size,
+    :grid_size,
+    :bytes_per_pixel,
+    :blank,
+    grid: %Grid{},
+    cache: %{}
+  ]
+
+  @doc """
+  Builds a raster for a panel.
+
+  ## Options
+
+    * `:size` (required) — panel size in pixels, `{width, height}`
+    * `:format` (required) — a `RasterExRatatui.PixelFormat` module
+    * `:font` — a `RasterExRatatui.Font` module (default `RasterExRatatui.Font.Default6x8`)
+    * `:scale` — integer magnification of the font's cell (default `1`)
+    * `:format_opts` — passed to the format's `c:RasterExRatatui.PixelFormat.init/1` (default `[]`)
+
+  Raises `ArgumentError` when `scale` is not a positive integer or when not even one cell fits on the panel.
+
+  ## Examples
+
+      iex> alias RasterExRatatui.{Raster, PixelFormat}
+      iex> raster = Raster.new(size: {1920, 1080}, format: PixelFormat.XRGB8888, scale: 3)
+      iex> {Raster.grid_size(raster), Raster.font_size(raster), Raster.margin(raster)}
+      {{106, 45}, {18, 24}, {12, 0}}
+  """
+  @spec new(keyword()) :: t()
+  def new(opts) do
+    {width, height} = size = Keyword.fetch!(opts, :size)
+    format = Keyword.fetch!(opts, :format)
+    font = Keyword.get(opts, :font, Font.Default6x8)
+    scale = Keyword.get(opts, :scale, 1)
+
+    unless is_integer(scale) and scale >= 1 do
+      raise ArgumentError, "expected :scale to be a positive integer, got: #{inspect(scale)}"
+    end
+
+    {font_w, font_h} = font.cell_size()
+    {cell_w, cell_h} = {font_w * scale, font_h * scale}
+    grid_size = {div(width, cell_w), div(height, cell_h)}
+
+    if elem(grid_size, 0) == 0 or elem(grid_size, 1) == 0 do
+      raise ArgumentError,
+            "a #{width}x#{height} panel fits no #{cell_w}x#{cell_h} cell (font #{inspect(font)}, scale #{scale})"
+    end
+
+    config = format.init(Keyword.get(opts, :format_opts, []))
+
+    %__MODULE__{
+      size: size,
+      font: font,
+      format: format,
+      config: config,
+      scale: scale,
+      cell_size: {cell_w, cell_h},
+      grid_size: grid_size,
+      bytes_per_pixel: format.bytes_per_pixel(config),
+      blank: format.blank(config)
+    }
+  end
+
+  @doc """
+  Panel size in pixels, `{width, height}`.
+
+  ## Examples
+
+      iex> RasterExRatatui.Raster.new(size: {400, 300}, format: RasterExRatatui.PixelFormat.Mono) |> RasterExRatatui.Raster.size()
+      {400, 300}
+  """
+  @spec size(t()) :: size()
+  def size(%__MODULE__{size: size}), do: size
+
+  @doc """
+  Grid size in cells, `{cols, rows}`: the size to create the `ExRatatui.CellSession` with.
+
+  ## Examples
+
+      iex> RasterExRatatui.Raster.new(size: {400, 300}, format: RasterExRatatui.PixelFormat.Mono) |> RasterExRatatui.Raster.grid_size()
+      {66, 37}
+  """
+  @spec grid_size(t()) :: size()
+  def grid_size(%__MODULE__{grid_size: grid_size}), do: grid_size
+
+  @doc """
+  Effective cell size in pixels (the font's cell times the scale): the `font_size:` for `ExRatatui.CellSession.new/3`.
+
+  ## Examples
+
+      iex> RasterExRatatui.Raster.new(size: {400, 300}, format: RasterExRatatui.PixelFormat.Mono, scale: 2) |> RasterExRatatui.Raster.font_size()
+      {12, 16}
+  """
+  @spec font_size(t()) :: size()
+  def font_size(%__MODULE__{cell_size: cell_size}), do: cell_size
+
+  @doc """
+  The unused strips on the right and at the bottom, in pixels, `{right, bottom}`.
+
+  ## Examples
+
+      iex> RasterExRatatui.Raster.new(size: {400, 300}, format: RasterExRatatui.PixelFormat.Mono) |> RasterExRatatui.Raster.margin()
+      {4, 4}
+  """
+  @spec margin(t()) :: {non_neg_integer(), non_neg_integer()}
+  def margin(%__MODULE__{
+        size: {width, height},
+        cell_size: {cell_w, cell_h},
+        grid_size: {cols, rows}
+      }) do
+    {width - cols * cell_w, height - rows * cell_h}
+  end
+
+  @doc """
+  Bytes per packed pixel, from the format.
+
+  ## Examples
+
+      iex> RasterExRatatui.Raster.new(size: {64, 64}, format: RasterExRatatui.PixelFormat.RGB565) |> RasterExRatatui.Raster.bytes_per_pixel()
+      2
+  """
+  @spec bytes_per_pixel(t()) :: pos_integer()
+  def bytes_per_pixel(%__MODULE__{bytes_per_pixel: bpp}), do: bpp
+
+  @doc """
+  The raster's current grid.
+  """
+  @spec grid(t()) :: Grid.t()
+  def grid(%__MODULE__{grid: grid}), do: grid
+
+  @doc """
+  Rebuilds the geometry for a new panel size, keeping font, format, and scale, and clears the grid.
+
+  After a resize the `ExRatatui.CellSession` must be resized to the new `grid_size/1`; its next diff is a full payload, so `apply/2` repaints the whole panel.
+
+  ## Examples
+
+      iex> alias RasterExRatatui.Raster
+      iex> raster = Raster.new(size: {400, 300}, format: RasterExRatatui.PixelFormat.Mono)
+      iex> raster |> Raster.resize({120, 80}) |> Raster.grid_size()
+      {20, 10}
+  """
+  @spec resize(t(), size()) :: t()
+  def resize(%__MODULE__{} = raster, size) do
+    new(size: size, font: raster.font, format: raster.format, scale: raster.scale)
+    |> Map.merge(%{config: raster.config, blank: raster.blank, cache: raster.cache})
+  end
+
+  @doc """
+  Folds a snapshot or diff into the raster and returns the patches that repaint what changed.
+
+  See the moduledoc for which patches are produced.
+
+  ## Examples
+
+      iex> alias ExRatatui.CellSession.{Cell, Diff}
+      iex> alias RasterExRatatui.{Raster, PixelFormat}
+      iex> raster = Raster.new(size: {12, 8}, format: PixelFormat.Mono)
+      iex> full = %Diff{width: 2, height: 1, ops: [%Cell{col: 0, symbol: "A"}, %Cell{col: 1}]}
+      iex> {raster, [row]} = Raster.apply(raster, full)
+      iex> {row.x, row.y, row.width, row.height, byte_size(row.data)}
+      {0, 0, 12, 8, 96}
+      iex> {_raster, [cell]} = Raster.apply(raster, %Diff{width: 2, height: 1, ops: [%Cell{col: 1, symbol: "B"}]})
+      iex> {cell.x, cell.width}
+      {6, 6}
+  """
+  @spec apply(t(), Snapshot.t() | Diff.t()) :: {t(), [Patch.t()]}
+  def apply(%__MODULE__{} = raster, payload) do
+    old_regions = drawable(raster.grid.regions)
+    {grid, changed, regions_changed?} = Grid.apply(raster.grid, payload)
+    raster = %{raster | grid: grid}
+    regions = drawable(grid.regions)
+
+    case changed do
+      :all ->
+        full_patches(raster, regions)
+
+      changed ->
+        cells =
+          if regions_changed?, do: changed ++ region_cells(raster, old_regions), else: changed
+
+        runs = cells |> Enum.filter(&paintable?(&1, raster, regions)) |> runs()
+        {cell_patches, raster} = Enum.map_reduce(runs, raster, &run_patch(&2, &1))
+        region_patches = if regions_changed?, do: region_patches(raster, regions), else: []
+        {raster, cell_patches ++ region_patches}
+    end
+  end
+
+  @doc """
+  Renders the whole panel as one row-major buffer of `width * height` packed pixels: cells, then regions, then margins.
+
+  ## Examples
+
+      iex> alias ExRatatui.CellSession.{Cell, Snapshot}
+      iex> alias RasterExRatatui.{Raster, PixelFormat}
+      iex> raster = Raster.new(size: {8, 9}, format: PixelFormat.Mono)
+      iex> {raster, _patches} = Raster.apply(raster, %Snapshot{width: 1, height: 1, cells: [%Cell{symbol: "█"}]})
+      iex> frame = Raster.frame(raster)
+      iex> {byte_size(frame), :binary.at(frame, 0), :binary.at(frame, 6), :binary.at(frame, 8 * 8)}
+      {72, 0, 255, 255}
+  """
+  @spec frame(t()) :: binary()
+  def frame(%__MODULE__{size: {width, height}, bytes_per_pixel: bpp} = raster) do
+    {_raster, patches} = full_patches(raster, drawable(raster.grid.regions))
+    line = width * bpp
+    blank_line = :binary.copy(raster.blank, width)
+
+    spans =
+      patches
+      |> Enum.reverse()
+      |> Enum.reduce(%{}, fn %Patch{} = patch, acc ->
+        span = patch.width * bpp
+
+        Enum.reduce(0..(patch.height - 1)//1, acc, fn r, acc ->
+          slice = {patch.x * bpp, binary_part(patch.data, r * span, span)}
+          Map.update(acc, patch.y + r, [slice], &[slice | &1])
+        end)
+      end)
+
+    for y <- 0..(height - 1), into: <<>> do
+      spans
+      |> Map.get(y, [])
+      |> Enum.reduce(blank_line, fn {offset, bytes}, acc ->
+        size = byte_size(bytes)
+        tail = offset + size
+
+        <<binary_part(acc, 0, offset)::binary, bytes::binary,
+          binary_part(acc, tail, line - tail)::binary>>
+      end)
+    end
+  end
+
+  # -- patches ---------------------------------------------------------------
+
+  defp full_patches(%__MODULE__{grid_size: {cols, rows}} = raster, regions) do
+    {rows, raster} = Enum.map_reduce(0..(rows - 1), raster, &run_patch(&2, {&1, 0, cols - 1}))
+    {raster, rows ++ region_patches(raster, regions) ++ margin_patches(raster)}
+  end
+
+  defp margin_patches(%__MODULE__{} = raster) do
+    {width, height} = raster.size
+    {right, bottom} = margin(raster)
+    {cols, rows} = raster.grid_size
+    {cell_w, cell_h} = raster.cell_size
+
+    [
+      {cols * cell_w, 0, right, height},
+      {0, rows * cell_h, width - right, bottom}
+    ]
+    |> Enum.filter(fn {_x, _y, w, h} -> w > 0 and h > 0 end)
+    |> Enum.map(fn {x, y, w, h} ->
+      %Patch{x: x, y: y, width: w, height: h, data: :binary.copy(raster.blank, w * h)}
+    end)
+  end
+
+  # Positions of every cell inside the grid that a region covers.
+  defp region_cells(%__MODULE__{grid_size: {cols, rows}}, regions) do
+    for %Region{} = region <- regions,
+        row <- region.y..(region.y + region.height - 1)//1,
+        row < rows,
+        col <- region.x..(region.x + region.width - 1)//1,
+        col < cols,
+        do: {col, row}
+  end
+
+  defp paintable?({col, row}, %__MODULE__{grid_size: {cols, rows}}, regions) do
+    col < cols and row < rows and not Enum.any?(regions, &covers?(&1, col, row))
+  end
+
+  defp covers?(%Region{x: x, y: y, width: w, height: h}, col, row) do
+    col >= x and col < x + w and row >= y and row < y + h
+  end
+
+  # Regions that produce pixels. A region without a bitmap covers nothing,
+  # so the cells under it keep being painted.
+  defp drawable(regions) do
+    Enum.filter(regions, fn %Region{} = r ->
+      r.format == :rgb8 and r.pixel_width > 0 and r.pixel_height > 0 and r.width > 0 and
+        r.height > 0
+    end)
+  end
+
+  # Groups `{col, row}` positions into `{row, first_col, last_col}` runs.
+  defp runs(positions) do
+    positions
+    |> Enum.uniq()
+    |> Enum.sort_by(fn {col, row} -> {row, col} end)
+    |> Enum.chunk_while(
+      nil,
+      fn
+        {col, row}, {row, first, last} when col == last + 1 -> {:cont, {row, first, col}}
+        {col, row}, nil -> {:cont, {row, col, col}}
+        {col, row}, run -> {:cont, run, {row, col, col}}
+      end,
+      fn
+        nil -> {:cont, nil}
+        run -> {:cont, run, nil}
+      end
+    )
+  end
+
+  defp run_patch(%__MODULE__{} = raster, {row, first, last}) do
+    {cell_w, cell_h} = raster.cell_size
+    line = cell_w * raster.bytes_per_pixel
+    {blocks, raster} = Enum.map_reduce(first..last, raster, &cell_block(&2, &1, row))
+
+    data =
+      for dy <- 0..(cell_h - 1), block <- blocks, into: <<>> do
+        binary_part(block, dy * line, line)
+      end
+
+    patch = %Patch{
+      x: first * cell_w,
+      y: row * cell_h,
+      width: (last - first + 1) * cell_w,
+      height: cell_h,
+      data: data
+    }
+
+    {patch, raster}
+  end
+
+  defp region_patches(%__MODULE__{} = raster, regions) do
+    regions |> Enum.map(&region_patch(raster, &1)) |> Enum.reject(&is_nil/1)
+  end
+
+  defp region_patch(%__MODULE__{} = raster, %Region{pixel_width: pw, pixel_height: ph} = region) do
+    {cell_w, cell_h} = raster.cell_size
+    {cols, rows} = raster.grid_size
+    %{format: format, config: config} = raster
+
+    x0 = region.x * cell_w
+    y0 = region.y * cell_h
+    rect_w = min(region.width * cell_w, cols * cell_w - x0)
+    rect_h = min(region.height * cell_h, rows * cell_h - y0)
+
+    if rect_w > 0 and rect_h > 0 do
+      columns = for dx <- 0..(rect_w - 1), do: {x0 + dx, div(dx * pw, region.width * cell_w) * 3}
+
+      data =
+        for dy <- 0..(rect_h - 1), into: <<>> do
+          sy = div(dy * ph, region.height * cell_h)
+          source = binary_part(region.data, sy * pw * 3, pw * 3)
+          region_row(source, columns, y0 + dy, format, config)
+        end
+
+      %Patch{x: x0, y: y0, width: rect_w, height: rect_h, data: data}
+    end
+  end
+
+  defp region_row(source, columns, y, format, config) do
+    for {x, offset} <- columns, into: <<>> do
+      <<r, g, b>> = binary_part(source, offset, 3)
+      format.rgb_pixel(r, g, b, x, y, config)
+    end
+  end
+
+  # -- cells -----------------------------------------------------------------
+
+  # The packed pixels of one cell, row-major, cached by what they depend on.
+  defp cell_block(%__MODULE__{} = raster, col, row) do
+    cell =
+      case Grid.cell(raster.grid, col, row) do
+        %Cell{skip: false} = cell -> cell
+        _missing_or_skipped -> %Cell{}
+      end
+
+    {fg, bg} = raster.format.cell_paints(cell, raster.config)
+    {cell_w, cell_h} = raster.cell_size
+    parity = if is_binary(fg) and is_binary(bg), do: 0, else: rem(col * cell_w + row * cell_h, 2)
+    codepoint = Font.codepoint(cell.symbol)
+    key = {codepoint, fg, bg, parity}
+
+    case raster.cache do
+      %{^key => block} ->
+        {block, raster}
+
+      cache ->
+        block = render_block(raster, raster.font.glyph(codepoint), fg, bg, parity)
+        cache = if map_size(cache) >= @cache_limit, do: %{}, else: cache
+        {block, %{raster | cache: Map.put(cache, key, block)}}
+    end
+  end
+
+  defp render_block(%__MODULE__{font: font, scale: scale}, glyph, fg, bg, _parity)
+       when is_binary(fg) and is_binary(bg) do
+    {font_w, _font_h} = font.cell_size()
+    fg = :binary.copy(fg, scale)
+    bg = :binary.copy(bg, scale)
+
+    for row <- glyph_rows(glyph, font_w), into: <<>> do
+      line = for bit <- row, into: <<>>, do: if(bit == 1, do: fg, else: bg)
+      :binary.copy(line, scale)
+    end
+  end
+
+  defp render_block(%__MODULE__{font: font, scale: scale}, glyph, fg, bg, parity) do
+    {font_w, _font_h} = font.cell_size()
+
+    for {row, gy} <- Enum.with_index(glyph_rows(glyph, font_w)),
+        sy <- 0..(scale - 1),
+        {bit, gx} <- Enum.with_index(row),
+        sx <- 0..(scale - 1),
+        into: <<>> do
+      paint = if bit == 1, do: fg, else: bg
+      PixelFormat.resolve(paint, gx * scale + sx + parity, gy * scale + sy)
+    end
+  end
+
+  defp glyph_rows(glyph, font_w) do
+    for(<<bit::1 <- glyph>>, do: bit) |> Enum.chunk_every(font_w)
+  end
+end
