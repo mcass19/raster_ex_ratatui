@@ -7,7 +7,7 @@
 
 Render [ExRatatui](https://github.com/mcass19/ex_ratatui) apps on pixel displays: e-ink panels, SPI LCDs, HDMI through a Linux framebuffer.
 
-<!-- .github/demo.gif: the Goatmire badge and the rpi4 HDMI demo, added before the first release -->
+<!-- .github/demo.gif: the Goatmire badge running on raster_ex_ratatui -->
 
 A terminal paints glyphs for us. A panel with nothing but pixels does not, so something has to turn every cell (a symbol, a foreground, a background) into pixels, and blit the bitmaps that `Viewport3D` and `Image` render. `RasterExRatatui` is that something. It sits on top of an `ExRatatui.CellSession`, keeps the cell grid and the pixel regions of the current frame, and hands the device only the rectangles that changed, already packed in the panel's pixel format.
 
@@ -58,7 +58,7 @@ end
 
 ## Examples
 
-A headless snapshot script and a Raspberry Pi 4 HDMI project live under [`examples/`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples). See the [catalog](https://github.com/mcass19/raster_ex_ratatui/blob/main/examples/README.md).
+A headless snapshot script lives under [`examples/`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples). See the [catalog](https://github.com/mcass19/raster_ex_ratatui/blob/main/examples/README.md).
 
 ## Guides
 
@@ -92,7 +92,7 @@ end
 ### Prerequisites
 
 - Elixir 1.17+
-- ex_ratatui with pixel regions (`CellSession.new/3` with `font_size:`)
+- ex_ratatui 0.14 or later (pixel regions: `CellSession.new/3` with `font_size:`)
 
 ## Contributing
 

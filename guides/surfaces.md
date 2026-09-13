@@ -116,8 +116,12 @@ end
 
 ## Worked example: the name badge
 
-The badge already owns a screen process (it navigates between apps and shows a crash frame), so it uses the pure core instead of the surface process: it creates the session with `Raster.font_size/1`, starts the app server with a writer that sends diffs to its screen, and folds them with `RasterExRatatui.Raster.apply/2`. Its 1-bit panel only refreshes whole frames, so it renders `RasterExRatatui.Raster.frame/1` with `RasterExRatatui.PixelFormat.Mono` and hands the gray8 buffer to its PNG + SPI driver. Two GPIO buttons become `%Key{}` events it sends to the server.
+The badge already owns a screen process (it navigates between apps, dedupes refreshes, and shows a crash frame), so it uses the pure core instead of the surface process. Its raster is `Raster.new(size: {400, 300}, format: RasterExRatatui.PixelFormat.Mono)`, a 66×37 grid; it creates the session with `Raster.font_size/1` and starts the app server, linked, with a writer that sends every diff to the screen process.
+
+Its e-ink panel only takes whole frames, and a refresh blocks for a moment, so the screen keeps the current 400×300 gray8 frame (`Raster.frame/1` of the empty raster to begin with) and folds each diff into it: `Raster.apply/2`, then every patch written over the frame with `RasterExRatatui.Patch.blit/4`. That costs only the changed rectangles instead of a full `frame/1` per render. Before folding, it drains every other diff already waiting in its mailbox, so the next refresh shows the latest frame rather than replaying the ones that queued up during the last one. The frame goes to its dithering + SPI driver as is.
+
+The screen traps exits: when the app crashes it draws a crash frame (a plain `CellSession` snapshot through the same raster) instead of dying. Two GPIO buttons become `%ExRatatui.Event.Key{}` events it sends to the server, and on shutdown it stops the server before closing the session.
 
 ## Worked example: an HDMI monitor on a Raspberry Pi 4
 
-The Pi uses the surface process: `init/1` reads the framebuffer geometry with `RasterExRatatui.Framebuffer.info/2`, picks the format with `RasterExRatatui.Framebuffer.format_for/1`, opens `/dev/fb0`, and starts an `input_event` reader for the keyboard; `push/2` is one `RasterExRatatui.Framebuffer.write/2`; `handle_info/2` runs the keyboard messages through `RasterExRatatui.Input.Evdev`. The [Linux Framebuffers guide](framebuffer.md) walks through it, and `examples/rpi4_hdmi` is the complete project.
+The Pi uses the surface process: `init/1` reads the framebuffer geometry with `RasterExRatatui.Framebuffer.info/2`, picks the format with `RasterExRatatui.Framebuffer.format_for/1`, opens `/dev/fb0`, and starts an `input_event` reader for the keyboard; `push/2` is one `RasterExRatatui.Framebuffer.write/2`; `handle_info/2` runs the keyboard messages through `RasterExRatatui.Input.Evdev`. The [Linux Framebuffers guide](framebuffer.md) walks through it.

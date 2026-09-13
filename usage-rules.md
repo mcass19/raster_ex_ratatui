@@ -9,7 +9,7 @@ It is **not** a terminal emulator, a font renderer, or a display driver, and app
 | Use | When |
 |-----|------|
 | `use RasterExRatatui.Surface` | The default. A supervised process owns the app, rasterises, and calls `push/2` |
-| `RasterExRatatui.Raster` directly | The consumer already owns a process and a device loop (the name badge does) |
+| `RasterExRatatui.Raster` directly | The consumer already owns a process and a device loop (the name badge does: it keeps a frame and writes each diff's patches over it with `Patch.blit/4`) |
 
 ## Surfaces
 

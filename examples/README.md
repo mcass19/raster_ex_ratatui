@@ -7,7 +7,6 @@ A catalog of `raster_ex_ratatui` examples. None of them needs a terminal.
 | Example | What to see |
 |---------|-------------|
 | [`headless/snapshot.exs`](headless/snapshot.exs) | A dashboard with text, a gauge, a sparkline, and a `Viewport3D` cube rasterised twice from the same widgets: a colour frame (`XRGB8888` at scale 2, written as PPM) and a 1-bit e-ink frame (`Mono`, written as PGM). Runs anywhere: `mix run examples/headless/snapshot.exs`. |
-| `rpi4_hdmi/` | A Nerves project for a Raspberry Pi 4: a surface on `/dev/fb0` with a USB keyboard, showing a `Viewport3D` at native resolution, a system panel, and a text box. See the [Linux Framebuffers guide](https://hexdocs.pm/raster_ex_ratatui/framebuffer.html). |
 
 ## Where to start
 

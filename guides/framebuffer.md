@@ -1,6 +1,6 @@
 # Linux Framebuffers
 
-A Linux framebuffer exposes a display as a file: `/dev/fb0` holds the pixels and `/sys/class/graphics/fb0` describes them. It is the shortest path from Elixir to an HDMI monitor or a DSI panel on a Raspberry Pi, with no C driver and no compositor. `RasterExRatatui.Framebuffer` wraps it, and this guide puts an ExRatatui app on a Pi 4's HDMI output with a USB keyboard, on Nerves. `examples/rpi4_hdmi` is the complete project.
+A Linux framebuffer exposes a display as a file: `/dev/fb0` holds the pixels and `/sys/class/graphics/fb0` describes them. It is the shortest path from Elixir to an HDMI monitor or a DSI panel on a Raspberry Pi, with no C driver and no compositor. `RasterExRatatui.Framebuffer` wraps it, and this guide puts an ExRatatui app on a Pi 4's HDMI output with a USB keyboard, on Nerves.
 
 ## Check the device first
 
@@ -29,8 +29,8 @@ On a Pi with the full KMS driver (`dtoverlay=vc4-kms-v3d`, the default on curren
 ## The surface
 
 ```elixir
-defmodule Rpi4Hdmi.Surface do
-  use RasterExRatatui.Surface, app: Rpi4Hdmi.Dashboard, scale: 3
+defmodule MyDevice.HdmiSurface do
+  use RasterExRatatui.Surface, app: MyDevice.Dashboard, scale: 3
 
   alias RasterExRatatui.Framebuffer
   alias RasterExRatatui.Input.Evdev
