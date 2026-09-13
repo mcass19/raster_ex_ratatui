@@ -32,7 +32,7 @@ defmodule RasterExRatatui.Surface do
   2. `c:init/1` returns the consumer's state and a keyword list of options it could only know at runtime (typically `:size`, read from the device); those win over everything else.
   3. The process builds a `RasterExRatatui.Raster`, creates an `ExRatatui.CellSession` of the raster's grid with the raster's `font_size:`, and starts the app server on it, linked.
   4. Every render of the app arrives as a cell diff; the raster turns it into patches and `c:push/2` writes them.
-  5. When the app server exits, the surface exits with the same reason, and the consumer's supervisor restarts the pair. When the surface stops, it stops the app server.
+  5. When the app server exits, the surface exits with the same reason. The generated child spec is `restart: :transient`, like `ExRatatui.App`'s: a crash restarts the pair, an app that quits with `{:stop, state}` stays stopped. When the surface stops, it stops the app server first.
 
   ## Options
 
@@ -44,7 +44,10 @@ defmodule RasterExRatatui.Surface do
     * `:format` (required) — a `RasterExRatatui.PixelFormat` module
     * `:font`, `:scale`, `:format_opts` — see `RasterExRatatui.Raster.new/1`
     * `:push_mode` — `:patches` (default) calls `c:push/2` with the changed rectangles; `:frame` calls it with `{:frame, binary}`, the whole panel, for panels that only take full frames
-    * `:min_interval` — minimum milliseconds between two pushes (default `0`). Diffs arriving sooner are still rasterised, and their patches are pushed together once the interval has passed, which keeps slow panels (e-ink, SPI at low baud) from queueing up refreshes
+    * `:min_interval` — minimum milliseconds between two pushes (default `0`). Diffs arriving sooner are still rasterised, and their patches are pushed together once the interval has passed, which keeps slow panels (e-ink, SPI at low baud) from refreshing more often than they should
+
+  Pushes never queue up behind a slow device: every render is rasterised as it arrives, and all the renders that arrived while `c:push/2` was busy are pushed together in the next call.
+    * `:shutdown_timeout` — milliseconds to wait for the app server to stop when the surface terminates before killing it (default `4_000`), so the consumer's `c:terminate/2` still runs within a supervisor's default 5-second shutdown
     * `:name` — registers the surface process
 
   Every other option reaches `c:init/1` untouched, so device settings (a device path, a GPIO pin) can travel with the rest.
@@ -103,7 +106,8 @@ defmodule RasterExRatatui.Surface do
         %{
           id: __MODULE__,
           start: {__MODULE__, :start_link, [opts]},
-          type: :worker
+          type: :worker,
+          restart: :transient
         }
       end
 

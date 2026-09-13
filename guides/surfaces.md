@@ -76,6 +76,8 @@ Some panels only take whole frames: an e-ink controller that refreshes the entir
 
 An e-ink refresh can take a second. `min_interval: 1_000` makes the surface push at most once per second: renders that arrive sooner are still rasterised (the raster must see every diff), and their patches are pushed together when the interval has passed. The app is never slowed down; it keeps rendering at its own pace.
 
+Without `min_interval` the surface still never falls behind a slow device: while `push/2` is busy, new renders are rasterised as they arrive and all of them go out in the next push, so a panel that takes 200 ms per write simply shows fewer, larger updates instead of an ever-growing queue.
+
 ## Input
 
 The surface does not read devices. Whatever does (an evdev keyboard, GPIO buttons, a touch controller) turns its events into `ExRatatui.Event` structs and sends them with `RasterExRatatui.Surface.send_event/2`:
@@ -90,7 +92,7 @@ Key codes must match what a terminal would send (lowercase strings, `kind: "pres
 
 ## Crashes and restarts
 
-The surface process links to the app server. If the app crashes, the surface exits with the same reason and its supervisor restarts it, which starts a fresh app and repaints the panel. If the surface stops, it stops the app first. There is no crash screen by default; a consumer that wants one (the badge shows a static frame) can trap the exit in its own process and draw it.
+The surface process links to the app server. If the app crashes, the surface exits with the same reason and its supervisor restarts it, which starts a fresh app and repaints the panel. The generated child spec is `restart: :transient`, as for `ExRatatui.App`, so an app that quits with `{:stop, state}` stays stopped; a kiosk that must always come back overrides `child_spec/1` with `restart: :permanent`. If the surface stops, it stops the app first, waiting up to `:shutdown_timeout` (4 seconds by default) for the app's own `terminate/2` before killing it, so the surface's `c:RasterExRatatui.Surface.terminate/2` still runs within a supervisor's default shutdown budget. There is no crash screen by default; a consumer that wants one (the badge shows a static frame) can trap the exit in its own process and draw it.
 
 Processes started in `init/1` with `start_link` are linked to the surface, and since the surface traps exits their `{:EXIT, pid, reason}` messages arrive in `handle_info/2`; handle them there.
 

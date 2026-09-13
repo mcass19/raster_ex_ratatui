@@ -34,6 +34,7 @@ scale: 1                 # integer magnification
 format_opts: [...]       # palette or tone thresholds
 push_mode: :patches      # or :frame
 min_interval: 0          # ms between pushes
+shutdown_timeout: 4_000  # then the app server is killed
 name: MyDevice.Surface
 ```
 

@@ -18,6 +18,7 @@ defmodule RasterExRatatui.SurfaceTest do
 
   import ExUnit.CaptureLog
 
+  alias ExRatatui.CellSession.{Cell, Diff}
   alias ExRatatui.Event.Key
   alias RasterExRatatui.{Patch, Raster, Surface}
   alias RasterExRatatui.SurfaceTest.DefaultSurface
@@ -33,6 +34,21 @@ defmodule RasterExRatatui.SurfaceTest do
   defp key(code), do: %Key{code: code, kind: "press"}
 
   defp pushed_area(patches), do: Enum.sum(Enum.map(patches, &(&1.width * &1.height)))
+
+  defp frame(surface), do: surface |> Surface.raster() |> Raster.frame()
+
+  # Every push that arrives until the surface has been quiet for `quiet` ms.
+  defp collect_pushes(quiet) do
+    receive do
+      {:pushed, pixels} -> [pixels | collect_pushes(quiet)]
+    after
+      quiet -> []
+    end
+  end
+
+  defp blit_all(frame, pushes, width, bpp) do
+    pushes |> Enum.concat() |> Enum.reduce(frame, &Patch.blit(&2, width, bpp, &1))
+  end
 
   describe "start" do
     test "the first render pushes the whole panel" do
@@ -55,15 +71,17 @@ defmodule RasterExRatatui.SurfaceTest do
       assert {:error, :no_mount} = TestSurface.start_link(test_pid: self(), app: FailingApp)
     end
 
-    test "an unknown push_mode is rejected" do
+    test "invalid push_mode, min_interval, and shutdown_timeout are rejected" do
       Process.flag(:trap_exit, true)
 
-      capture_log(fn ->
-        assert {:error, {%ArgumentError{message: message}, _}} =
-                 TestSurface.start_link(test_pid: self(), push_mode: :bytes)
+      for {key, value} <- [push_mode: :bytes, min_interval: :soon, shutdown_timeout: -1] do
+        capture_log(fn ->
+          assert {:error, {%ArgumentError{message: message}, _}} =
+                   TestSurface.start_link([{key, value}, test_pid: self()])
 
-        assert message =~ ":push_mode"
-      end)
+          assert message =~ inspect(key)
+        end)
+      end
     end
 
     test "app_opts reach the app and name registers the surface" do
@@ -87,6 +105,7 @@ defmodule RasterExRatatui.SurfaceTest do
       assert_receive {:pushed, [%Patch{x: 12, y: 0, width: 6, height: 8}]}
 
       assert :ok = stop_supervised(DefaultSurface)
+      assert DefaultSurface.child_spec([]).restart == :transient
     end
   end
 
@@ -108,10 +127,35 @@ defmodule RasterExRatatui.SurfaceTest do
 
     test "handle_info/2 can return events for the app" do
       surface = start_surface()
+      before = frame(surface)
       send(surface, {:keys, ["a", "b"]})
 
-      assert_receive {:pushed, patches}
-      assert Enum.map(patches, &{&1.x, &1.width}) in [[{12, 6}], [{12, 12}]]
+      pushes = collect_pushes(150)
+      assert pushes != []
+      assert pushes |> Enum.concat() |> Enum.map(&(&1.x + &1.width)) |> Enum.max() == 24
+      assert blit_all(before, pushes, 240, 1) == frame(surface)
+    end
+
+    test "renders that arrive during a slow push are pushed together" do
+      surface = start_surface(push_delay: 150)
+      before = frame(surface)
+
+      for code <- ~w(a b c d e), do: Surface.send_event(surface, key(code))
+
+      pushes = collect_pushes(400)
+      assert length(pushes) in 1..2
+      assert blit_all(before, pushes, 240, 1) == frame(surface)
+    end
+
+    test "a diff with stale dimensions is dropped" do
+      surface = start_surface()
+      stale = %Diff{width: 3, height: 3, ops: [%Cell{symbol: "x"}]}
+
+      send(surface, {RasterExRatatui.Surface.Server, :diff, stale})
+      send(surface, {RasterExRatatui.Surface.Server, :flush})
+
+      refute_receive {:pushed, _}, 100
+      assert Surface.raster(surface).grid.width == 40
     end
 
     test "push_mode: :frame pushes whole panels" do
@@ -178,6 +222,17 @@ defmodule RasterExRatatui.SurfaceTest do
       assert_receive {:terminated, :normal}
     end
 
+    test "an app server that does not stop in time is killed" do
+      surface = start_surface(shutdown_timeout: 50, app_opts: [hang_terminate: true])
+      server = Surface.server(surface)
+      ref = Process.monitor(server)
+
+      # The killed server's task supervisor logs its own exit.
+      capture_log(fn -> GenServer.stop(surface) end)
+      assert_receive {:DOWN, ^ref, :process, ^server, :killed}
+      assert_receive {:terminated, :normal}
+    end
+
     test "stopping the surface stops the app server" do
       surface = start_surface()
       server = Surface.server(surface)
@@ -206,24 +261,27 @@ defmodule RasterExRatatui.SurfaceTest do
     end
 
     test "covers the surface lifecycle, rasterisation, pushes, and input" do
+      # Other async tests run surfaces too; every assertion pins this surface's pid.
       {:ok, surface} = TestSurface.start_link(test_pid: self())
-      meta = %{surface: TestSurface, mod: RasterExRatatui.Test.App}
+      meta = %{surface: TestSurface, mod: RasterExRatatui.Test.App, pid: surface}
 
       assert_receive {:telemetry, [_, :surface, :start],
-                      %{size: {240, 160}, grid_size: {40, 20}} = start}
+                      %{pid: ^surface, size: {240, 160}, grid_size: {40, 20}} = start}
 
-      assert Map.take(start, [:surface, :mod]) == meta
+      assert Map.take(start, [:surface, :mod, :pid]) == meta
 
       assert_receive {:telemetry, [_, :frame, :raster, :stop],
-                      %{cells: 800, regions: 0, patches: 20}}
+                      %{pid: ^surface, cells: 800, regions: 0, patches: 20}}
 
-      assert_receive {:telemetry, [_, :frame, :push, :stop], %{push_mode: :patches}}
+      assert_receive {:telemetry, [_, :frame, :push, :stop],
+                      %{pid: ^surface, push_mode: :patches}}
 
       Surface.send_event(surface, key("a"))
-      assert_receive {:telemetry, [_, :input, :forward], %{event: %Key{code: "a"}}}
+
+      assert_receive {:telemetry, [_, :input, :forward], %{pid: ^surface, event: %Key{code: "a"}}}
 
       GenServer.stop(surface)
-      assert_receive {:telemetry, [_, :surface, :stop], %{reason: :normal}}
+      assert_receive {:telemetry, [_, :surface, :stop], %{pid: ^surface, reason: :normal}}
     end
   end
 

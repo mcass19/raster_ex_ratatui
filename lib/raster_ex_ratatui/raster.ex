@@ -20,11 +20,12 @@ defmodule RasterExRatatui.Raster do
   `apply/2` rasterises only what changed:
 
     * changed cells, one patch per contiguous run on a row
-    * cells under a pixel region are skipped: they arrive blank and the region paints over them
     * when the region list changed, one patch per region (its bitmap scaled nearest-neighbour onto its cell rect, clipped to the grid), plus the cells an old region no longer covers
-    * on a full payload (the first diff, a snapshot, a resize), every row of cells, every region, and the margins
+    * on a full payload (the first diff, a snapshot, a resize), every run of cells on every row, every region, and the margins
 
-  Patches must be written in list order. `frame/1` renders the whole panel as one buffer for panels that only take full frames; writing `apply/2`'s patches over the previous `frame/1` gives the next one.
+  Cells under a pixel region are never rasterised, on full payloads or diffs: they arrive blank and the region paints over them.
+
+  Patches must be written in list order. `frame/1` renders the whole panel as one buffer for panels that only take full frames (`render_frame/1` does the same and keeps the glyph cache it fills); writing `apply/2`'s patches over the previous `frame/1` gives the next one.
   """
 
   alias ExRatatui.CellSession.{Cell, Diff, Region, Snapshot}
@@ -267,8 +268,24 @@ defmodule RasterExRatatui.Raster do
       {72, 0, 255, 255}
   """
   @spec frame(t()) :: binary()
-  def frame(%__MODULE__{size: {width, height}, bytes_per_pixel: bpp} = raster) do
-    {_raster, patches} = full_patches(raster, drawable(raster.grid.regions))
+  def frame(%__MODULE__{} = raster), do: raster |> render_frame() |> elem(1)
+
+  @doc """
+  Like `frame/1`, but also returns the raster with every glyph it rendered added to its cache. Use it when rendering frames repeatedly (a panel that only takes full frames) and keep the returned raster.
+
+  ## Examples
+
+      iex> alias ExRatatui.CellSession.{Cell, Snapshot}
+      iex> alias RasterExRatatui.{Raster, PixelFormat}
+      iex> raster = Raster.new(size: {12, 8}, format: PixelFormat.Mono)
+      iex> {raster, _patches} = Raster.apply(raster, %Snapshot{width: 2, height: 1, cells: [%Cell{symbol: "A"}]})
+      iex> {rendered, frame} = Raster.render_frame(%{raster | cache: %{}})
+      iex> {frame == Raster.frame(raster), map_size(rendered.cache) > 0}
+      {true, true}
+  """
+  @spec render_frame(t()) :: {t(), binary()}
+  def render_frame(%__MODULE__{size: {width, height}, bytes_per_pixel: bpp} = raster) do
+    {raster, patches} = full_patches(raster, drawable(raster.grid.regions))
     line = width * bpp
     blank_line = :binary.copy(raster.blank, width)
 
@@ -284,24 +301,33 @@ defmodule RasterExRatatui.Raster do
         end)
       end)
 
-    for y <- 0..(height - 1), into: <<>> do
-      spans
-      |> Map.get(y, [])
-      |> Enum.reduce(blank_line, fn {offset, bytes}, acc ->
-        size = byte_size(bytes)
-        tail = offset + size
+    frame =
+      for y <- 0..(height - 1), into: <<>> do
+        spans
+        |> Map.get(y, [])
+        |> Enum.reduce(blank_line, fn {offset, bytes}, acc ->
+          size = byte_size(bytes)
+          tail = offset + size
 
-        <<binary_part(acc, 0, offset)::binary, bytes::binary,
-          binary_part(acc, tail, line - tail)::binary>>
-      end)
-    end
+          <<binary_part(acc, 0, offset)::binary, bytes::binary,
+            binary_part(acc, tail, line - tail)::binary>>
+        end)
+      end
+
+    {raster, frame}
   end
 
   # -- patches ---------------------------------------------------------------
 
   defp full_patches(%__MODULE__{grid_size: {cols, rows}} = raster, regions) do
-    {rows, raster} = Enum.map_reduce(0..(rows - 1), raster, &run_patch(&2, {&1, 0, cols - 1}))
-    {raster, rows ++ region_patches(raster, regions) ++ margin_patches(raster)}
+    cells =
+      for row <- 0..(rows - 1),
+          col <- 0..(cols - 1),
+          paintable?({col, row}, raster, regions),
+          do: {col, row}
+
+    {cell_patches, raster} = Enum.map_reduce(runs(cells), raster, &run_patch(&2, &1))
+    {raster, cell_patches ++ region_patches(raster, regions) ++ margin_patches(raster)}
   end
 
   defp margin_patches(%__MODULE__{} = raster) do

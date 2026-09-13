@@ -152,8 +152,10 @@ defmodule RasterExRatatui.RasterTest do
       region = region(1, 0, 1, 1, {0, 0, 0})
       {_raster, patches} = Raster.apply(raster, full_diff({4, 2}, [], [region]))
 
+      # Row 0 skips the cell under the region.
       assert Enum.map(patches, &{&1.x, &1.y, &1.width, &1.height}) == [
-               {0, 0, 24, 8},
+               {0, 0, 6, 8},
+               {12, 0, 12, 8},
                {0, 8, 24, 8},
                {6, 0, 6, 8},
                {24, 0, 3, 19},
@@ -334,9 +336,8 @@ defmodule RasterExRatatui.RasterTest do
 
         {raster, _} = Raster.apply(raster, full_diff({5, 3}, []))
 
-        Enum.reduce(steps, {raster, Raster.frame(raster)}, fn {ops, regions}, {raster, frame} ->
-          {raster, patches} =
-            Raster.apply(raster, %Diff{width: 5, height: 3, ops: ops, regions: regions})
+        Enum.reduce(steps, {raster, Raster.frame(raster)}, fn diff, {raster, frame} ->
+          {raster, patches} = Raster.apply(raster, diff)
 
           next = Raster.frame(raster)
           assert blit(frame, raster, patches) == next
@@ -383,6 +384,21 @@ defmodule RasterExRatatui.RasterTest do
         region(x, y, w, h, {shade, 255 - shade, shade}, {pw, ph})
       end
 
-    tuple({list_of(cell, max_length: 8), list_of(region, max_length: 2)})
+    cells = list_of(cell, max_length: 8)
+    regions = list_of(region, max_length: 2)
+
+    # Mostly incremental diffs, sometimes a full payload, sometimes a full
+    # payload at another size (as after a resize).
+    frequency([
+      {6,
+       gen(all(ops <- cells, rs <- regions),
+         do: %Diff{width: 5, height: 3, ops: ops, regions: rs}
+       )},
+      {1, gen(all(ops <- cells, rs <- regions), do: full_diff({5, 3}, ops, rs))},
+      {1,
+       gen(all(ops <- cells, rs <- regions),
+         do: full_diff({4, 3}, Enum.filter(ops, &(&1.col < 4)), rs)
+       )}
+    ])
   end
 end

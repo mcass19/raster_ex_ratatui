@@ -28,23 +28,27 @@ defmodule RasterExRatatui.TelemetryTest do
   def forward(event, measurements, meta, test_pid),
     do: send(test_pid, {event, measurements, meta})
 
+  # Surface tests running concurrently emit the same event names, so every
+  # assertion pins a metadata value unique to the test.
   test "span/3 merges the stop metadata over the start metadata" do
-    assert :ok = Telemetry.span([:frame, :raster], %{mod: :app}, fn -> {:ok, %{patches: 2}} end)
+    mod = make_ref()
+    assert :ok = Telemetry.span([:frame, :raster], %{mod: mod}, fn -> {:ok, %{patches: 2}} end)
 
-    assert_receive {[:raster_ex_ratatui, :frame, :raster, :start], _, %{mod: :app} = start}
+    assert_receive {[:raster_ex_ratatui, :frame, :raster, :start], _, %{mod: ^mod} = start}
     refute Map.has_key?(start, :patches)
 
     assert_receive {[:raster_ex_ratatui, :frame, :raster, :stop], %{duration: _},
-                    %{mod: :app, patches: 2}}
+                    %{mod: ^mod, patches: 2}}
   end
 
   test "execute/3 adds system_time unless given" do
-    Telemetry.execute([:input, :forward], %{}, %{mod: :app})
-    assert_receive {[:raster_ex_ratatui, :input, :forward], %{system_time: t}, %{mod: :app}}
+    mod = make_ref()
+    Telemetry.execute([:input, :forward], %{}, %{mod: mod})
+    assert_receive {[:raster_ex_ratatui, :input, :forward], %{system_time: t}, %{mod: ^mod}}
     assert is_integer(t)
 
-    Telemetry.execute([:input, :forward], %{system_time: 7}, %{})
-    assert_receive {[:raster_ex_ratatui, :input, :forward], %{system_time: 7}, %{}}
+    Telemetry.execute([:input, :forward], %{system_time: 7}, %{mod: mod})
+    assert_receive {[:raster_ex_ratatui, :input, :forward], %{system_time: 7}, %{mod: ^mod}}
   end
 
   test "the default logger logs events until detached" do

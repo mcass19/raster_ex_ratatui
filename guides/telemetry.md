@@ -12,7 +12,7 @@
 [:raster_ex_ratatui, :input, :forward]   single  — an event forwarded to the app
 ```
 
-Span events emit `:start` / `:stop` / `:exception` suffixes. The `:frame, :raster` stop event carries `:cells`, `:regions`, and `:patches` counts in its metadata. See `RasterExRatatui.Telemetry` for the full metadata reference.
+Every event carries `:surface` (the surface module), `:mod` (the app), and `:pid` (the surface process, to tell several surfaces apart). Span events emit `:start` / `:stop` / `:exception` suffixes. The `:frame, :raster` stop event carries `:cells`, `:regions`, and `:patches` counts in its metadata. See `RasterExRatatui.Telemetry` for the full metadata reference.
 
 ## Quick start: log every event
 

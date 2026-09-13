@@ -9,7 +9,12 @@ defmodule RasterExRatatui.Test.App do
 
   @impl true
   def init(opts) do
-    {:ok, %{text: Keyword.get(opts, :text, "hi"), cube: Keyword.get(opts, :cube, false)}}
+    {:ok,
+     %{
+       text: Keyword.get(opts, :text, "hi"),
+       cube: Keyword.get(opts, :cube, false),
+       hang_terminate: Keyword.get(opts, :hang_terminate, false)
+     }}
   end
 
   @impl true
@@ -20,6 +25,10 @@ defmodule RasterExRatatui.Test.App do
     do: {:noreply, %{state | text: state.text <> code}}
 
   def update(_msg, state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, %{hang_terminate: true}), do: Process.sleep(:infinity)
+  def terminate(_reason, _state), do: :ok
 
   @impl true
   def render(state, frame) do
@@ -60,23 +69,29 @@ defmodule RasterExRatatui.Test.Surface do
         {:stop, reason}
 
       :error ->
-        {:ok, [size: Keyword.get(opts, :size, {240, 160})], Keyword.fetch!(opts, :test_pid)}
+        state = %{
+          test_pid: Keyword.fetch!(opts, :test_pid),
+          push_delay: Keyword.get(opts, :push_delay, 0)
+        }
+
+        {:ok, [size: Keyword.get(opts, :size, {240, 160})], state}
     end
   end
 
   @impl true
-  def push(pixels, test_pid) do
-    send(test_pid, {:pushed, pixels})
-    test_pid
+  def push(pixels, state) do
+    send(state.test_pid, {:pushed, pixels})
+    Process.sleep(state.push_delay)
+    state
   end
 
   @impl true
-  def handle_info({:keys, codes}, test_pid) do
-    {:events, Enum.map(codes, &%ExRatatui.Event.Key{code: &1, kind: "press"}), test_pid}
+  def handle_info({:keys, codes}, state) do
+    {:events, Enum.map(codes, &%ExRatatui.Event.Key{code: &1, kind: "press"}), state}
   end
 
-  def handle_info(_msg, test_pid), do: {:noreply, test_pid}
+  def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
-  def terminate(reason, test_pid), do: send(test_pid, {:terminated, reason})
+  def terminate(reason, state), do: send(state.test_pid, {:terminated, reason})
 end

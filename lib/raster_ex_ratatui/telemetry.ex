@@ -12,8 +12,10 @@ defmodule RasterExRatatui.Telemetry do
 
   | Event | Description | Metadata |
   | ----- | ----------- | -------- |
-  | `[:raster_ex_ratatui, :frame, :raster]` | `RasterExRatatui.Raster.apply/2` (or `frame/1`) on one diff from the app server. | `:surface`, `:mod`; `:stop` adds `:cells`, `:regions`, `:patches` |
-  | `[:raster_ex_ratatui, :frame, :push]` | The consumer's `c:RasterExRatatui.Surface.push/2` call. | `:surface`, `:mod`, `:push_mode` |
+  | `[:raster_ex_ratatui, :frame, :raster]` | `RasterExRatatui.Raster.apply/2` on one diff from the app server. | `:surface`, `:mod`, `:pid`; `:stop` adds `:cells`, `:regions`, `:patches` |
+  | `[:raster_ex_ratatui, :frame, :push]` | The consumer's `c:RasterExRatatui.Surface.push/2` call. | `:surface`, `:mod`, `:pid`, `:push_mode` |
+
+  `:surface` is the surface module, `:mod` the app module, and `:pid` the surface process, which tells apart several surfaces running the same modules.
 
   `:start` events carry `%{monotonic_time: integer, system_time: integer}` as measurements. `:stop` events add `:duration` (native units). On exception the metadata gains `:kind`, `:reason`, and `:stacktrace`.
 
@@ -21,9 +23,9 @@ defmodule RasterExRatatui.Telemetry do
 
   | Event | Description | Measurements | Metadata |
   | ----- | ----------- | ------------ | -------- |
-  | `[:raster_ex_ratatui, :surface, :start]` | The surface built its raster and started the app server. | `%{system_time: integer}` | `:surface`, `:mod`, `:size`, `:grid_size` |
-  | `[:raster_ex_ratatui, :surface, :stop]` | The surface is terminating. | `%{system_time: integer}` | `:surface`, `:mod`, `:reason` |
-  | `[:raster_ex_ratatui, :input, :forward]` | An event was forwarded to the app server. | `%{system_time: integer}` | `:surface`, `:mod`, `:event` |
+  | `[:raster_ex_ratatui, :surface, :start]` | The surface built its raster and started the app server. | `%{system_time: integer}` | `:surface`, `:mod`, `:pid`, `:size`, `:grid_size` |
+  | `[:raster_ex_ratatui, :surface, :stop]` | The surface is terminating. | `%{system_time: integer}` | `:surface`, `:mod`, `:pid`, `:reason` |
+  | `[:raster_ex_ratatui, :input, :forward]` | An event was forwarded to the app server. | `%{system_time: integer}` | `:surface`, `:mod`, `:pid`, `:event` |
 
   ## Attaching a default logger
 
