@@ -1,0 +1,232 @@
+defmodule RasterExRatatui.SurfaceTest.DefaultSurface do
+  # Defined here rather than in test/support so the `use` macro expands
+  # while coverage is recording.
+  use RasterExRatatui.Surface,
+    app: RasterExRatatui.Test.App,
+    format: RasterExRatatui.PixelFormat.XRGB8888,
+    size: {60, 40}
+
+  @impl true
+  def push(pixels, opts) do
+    send(Keyword.fetch!(opts, :test_pid), {:pushed, pixels})
+    opts
+  end
+end
+
+defmodule RasterExRatatui.SurfaceTest do
+  use ExUnit.Case, async: true
+
+  import ExUnit.CaptureLog
+
+  alias ExRatatui.Event.Key
+  alias RasterExRatatui.{Patch, Raster, Surface}
+  alias RasterExRatatui.SurfaceTest.DefaultSurface
+  alias RasterExRatatui.Test.FailingApp
+  alias RasterExRatatui.Test.Surface, as: TestSurface
+
+  defp start_surface(opts \\ []) do
+    {:ok, surface} = TestSurface.start_link(Keyword.put_new(opts, :test_pid, self()))
+    assert_receive {:pushed, _initial}
+    surface
+  end
+
+  defp key(code), do: %Key{code: code, kind: "press"}
+
+  defp pushed_area(patches), do: Enum.sum(Enum.map(patches, &(&1.width * &1.height)))
+
+  describe "start" do
+    test "the first render pushes the whole panel" do
+      {:ok, surface} = TestSurface.start_link(test_pid: self())
+
+      assert_receive {:pushed, patches}
+      assert pushed_area(patches) == 240 * 160
+      assert Raster.grid_size(Surface.raster(surface)) == {40, 20}
+    end
+
+    test "init/1 can abort the start" do
+      Process.flag(:trap_exit, true)
+
+      assert {:error, :no_device} =
+               TestSurface.start_link(test_pid: self(), init_stop: :no_device)
+    end
+
+    test "an app that fails to mount stops the surface" do
+      Process.flag(:trap_exit, true)
+      assert {:error, :no_mount} = TestSurface.start_link(test_pid: self(), app: FailingApp)
+    end
+
+    test "an unknown push_mode is rejected" do
+      Process.flag(:trap_exit, true)
+
+      capture_log(fn ->
+        assert {:error, {%ArgumentError{message: message}, _}} =
+                 TestSurface.start_link(test_pid: self(), push_mode: :bytes)
+
+        assert message =~ ":push_mode"
+      end)
+    end
+
+    test "app_opts reach the app and name registers the surface" do
+      name = :"surface_#{System.unique_integer([:positive])}"
+      start_surface(name: name, app_opts: [text: "hello"])
+
+      frame = name |> Surface.raster() |> Raster.frame()
+      blank = :binary.copy(<<255>>, 30 * 8)
+      refute binary_part(frame, 0, 30 * 8) == blank
+      assert is_pid(Surface.server(name))
+    end
+
+    test "use defaults: child_spec, init/1 returning the options, handle_info/2, terminate/2" do
+      surface = start_supervised!({DefaultSurface, test_pid: self()})
+
+      assert_receive {:pushed, [%Patch{} | _] = patches}
+      assert pushed_area(patches) == 60 * 40
+
+      send(surface, :ignored)
+      Surface.send_event(surface, key("x"))
+      assert_receive {:pushed, [%Patch{x: 12, y: 0, width: 6, height: 8}]}
+
+      assert :ok = stop_supervised(DefaultSurface)
+    end
+  end
+
+  describe "rendering" do
+    test "send_event/2 forwards keys and the next push holds only what changed" do
+      surface = start_surface()
+      Surface.send_event(surface, key("a"))
+
+      assert_receive {:pushed, [%Patch{x: 12, y: 0, width: 6, height: 8, data: data}]}
+      assert byte_size(data) == 48
+    end
+
+    test "a render that changes nothing pushes nothing" do
+      surface = start_surface()
+      send(Surface.server(surface), :unrelated)
+
+      refute_receive {:pushed, _}, 100
+    end
+
+    test "handle_info/2 can return events for the app" do
+      surface = start_surface()
+      send(surface, {:keys, ["a", "b"]})
+
+      assert_receive {:pushed, patches}
+      assert Enum.map(patches, &{&1.x, &1.width}) in [[{12, 6}], [{12, 12}]]
+    end
+
+    test "push_mode: :frame pushes whole panels" do
+      surface = start_surface(push_mode: :frame)
+      Surface.send_event(surface, key("a"))
+
+      assert_receive {:pushed, {:frame, frame}}
+      assert byte_size(frame) == 240 * 160
+      assert frame == Raster.frame(Surface.raster(surface))
+    end
+
+    test "min_interval coalesces renders into one push" do
+      surface = start_surface(min_interval: 150)
+      Surface.send_event(surface, key("a"))
+      Surface.send_event(surface, key("b"))
+
+      assert_receive {:pushed, patches}, 1_000
+      refute_receive {:pushed, _}, 300
+
+      frame = Raster.frame(Surface.raster(surface))
+      assert Enum.reduce(patches, frame, &Patch.blit(&2, 240, 1, &1)) == frame
+      assert pushed_area(patches) >= 2 * 48
+    end
+
+    test "a Viewport3D in the app arrives as a region patch" do
+      {:ok, _surface} = TestSurface.start_link(test_pid: self(), app_opts: [cube: true])
+
+      assert_receive {:pushed, patches}
+
+      assert Enum.any?(patches, &match?(%Patch{x: 6, y: 16, width: 60, height: 32}, &1))
+    end
+
+    test "resize/2 rebuilds the grid and repaints the new panel" do
+      surface = start_surface()
+      assert Surface.resize(surface, {120, 80}) == {20, 10}
+
+      assert_receive {:pushed, patches}
+      assert pushed_area(patches) == 120 * 80
+      assert Raster.size(Surface.raster(surface)) == {120, 80}
+    end
+  end
+
+  describe "exits" do
+    test "an app crash stops the surface with the same reason" do
+      Process.flag(:trap_exit, true)
+      surface = start_surface()
+
+      log =
+        capture_log(fn ->
+          Surface.send_event(surface, key("!"))
+          assert_receive {:EXIT, ^surface, {%RuntimeError{message: "boom"}, _stack}}
+        end)
+
+      assert log =~ "boom"
+      assert_receive {:terminated, {%RuntimeError{}, _}}
+    end
+
+    test "an app that stops stops the surface normally" do
+      Process.flag(:trap_exit, true)
+      surface = start_surface()
+
+      Surface.send_event(surface, key("q"))
+      assert_receive {:EXIT, ^surface, :normal}
+      assert_receive {:terminated, :normal}
+    end
+
+    test "stopping the surface stops the app server" do
+      surface = start_surface()
+      server = Surface.server(surface)
+      ref = Process.monitor(server)
+
+      GenServer.stop(surface)
+      assert_receive {:DOWN, ^ref, :process, ^server, _reason}
+      assert_receive {:terminated, :normal}
+    end
+  end
+
+  describe "telemetry" do
+    setup do
+      id = "surface-test-#{System.unique_integer([:positive])}"
+
+      events = [
+        [:raster_ex_ratatui, :surface, :start],
+        [:raster_ex_ratatui, :surface, :stop],
+        [:raster_ex_ratatui, :frame, :raster, :stop],
+        [:raster_ex_ratatui, :frame, :push, :stop],
+        [:raster_ex_ratatui, :input, :forward]
+      ]
+
+      :telemetry.attach_many(id, events, &__MODULE__.forward_event/4, self())
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    test "covers the surface lifecycle, rasterisation, pushes, and input" do
+      {:ok, surface} = TestSurface.start_link(test_pid: self())
+      meta = %{surface: TestSurface, mod: RasterExRatatui.Test.App}
+
+      assert_receive {:telemetry, [_, :surface, :start],
+                      %{size: {240, 160}, grid_size: {40, 20}} = start}
+
+      assert Map.take(start, [:surface, :mod]) == meta
+
+      assert_receive {:telemetry, [_, :frame, :raster, :stop],
+                      %{cells: 800, regions: 0, patches: 20}}
+
+      assert_receive {:telemetry, [_, :frame, :push, :stop], %{push_mode: :patches}}
+
+      Surface.send_event(surface, key("a"))
+      assert_receive {:telemetry, [_, :input, :forward], %{event: %Key{code: "a"}}}
+
+      GenServer.stop(surface)
+      assert_receive {:telemetry, [_, :surface, :stop], %{reason: :normal}}
+    end
+  end
+
+  def forward_event(event, _measurements, meta, test_pid),
+    do: send(test_pid, {:telemetry, event, meta})
+end
