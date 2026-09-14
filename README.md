@@ -5,7 +5,7 @@
 [![CI](https://github.com/mcass19/raster_ex_ratatui/actions/workflows/ci.yml/badge.svg)](https://github.com/mcass19/raster_ex_ratatui/actions/workflows/ci.yml)
 [![License](https://img.shields.io/hexpm/l/raster_ex_ratatui.svg)](https://github.com/mcass19/raster_ex_ratatui/blob/main/LICENSE)
 
-Render [ExRatatui](https://github.com/mcass19/ex_ratatui) apps on pixel displays: e-ink panels, SPI LCDs, HDMI through a Linux framebuffer.
+Render [ExRatatui](https://github.com/mcass19/ex_ratatui) apps on pixel displays such as e-ink panels, with helpers for Linux framebuffers.
 
 <!-- .github/demo.gif: the Goatmire badge running on raster_ex_ratatui -->
 
@@ -18,7 +18,7 @@ ExRatatui app ──> ExRatatui.Server ──> CellSession diff (cells + regions
                                               │
                          [%Patch{x, y, width, height, data}]
                                               │
-                         Surface.push/2 ──> e-ink / LCD / /dev/fb0
+                         Surface.push/2 ──> the panel
 ```
 
 ## Features
@@ -30,6 +30,10 @@ ExRatatui app ──> ExRatatui.Server ──> CellSession diff (cells + regions
 - **Fonts** — a built-in 6×8 bitmap font with box drawing, blocks, and braille, an integer `scale:` for large panels, and a `Font` behaviour to bring another.
 - **Device helpers** — `Framebuffer` for Linux fbdev (geometry from sysfs, stride-aware writes) and `Input.Evdev` to turn keyboard events into `ExRatatui.Event.Key` structs.
 - **Pure core** — `Raster`, `Grid`, fonts, and formats are plain functions, usable from any process that already owns its device.
+
+## Status
+
+The first consumer is the Goatmire name badge, a 400×300 1-bit e-ink panel. Its screen is built on the pure core (`Raster` and `Patch.blit/4`) and tested on the host against the frame it sends to the panel. The `Framebuffer` and `Input.Evdev` helpers are tested against a fake sysfs and synthetic key events but have not run on a device yet; a Raspberry Pi 4 with the official Touch Display 2 is the first hardware planned for them.
 
 ## Quick start
 
@@ -64,10 +68,10 @@ A headless snapshot script lives under [`examples/`](https://github.com/mcass19/
 
 | Guide | Description |
 |-------|-------------|
-| [Building a Surface](guides/surfaces.md) | The contract: geometry, push, input, crashes, testing, and the two worked examples |
+| [Building a Surface](guides/surfaces.md) | The contract: geometry, push, input, crashes, testing, and the name badge as a worked example |
 | [Fonts](guides/fonts.md) | The glyph layout, the built-in 6×8 font, scale, and bringing a font |
 | [Pixel Formats](guides/pixel_formats.md) | `Mono` tone rules and dithering, colour palettes, writing a format |
-| [Linux Framebuffers](guides/framebuffer.md) | A Raspberry Pi 4 on HDMI with a USB keyboard, on Nerves |
+| [Linux Framebuffers](guides/framebuffer.md) | `Framebuffer` and `Input.Evdev`: device geometry, writes, the kernel console, and keyboards |
 | [Telemetry](guides/telemetry.md) | Rasterisation, push, and input events with a `Telemetry.Metrics` example |
 | [Cheatsheet](guides/cheatsheet.cheatmd) | Every option and call on one page |
 

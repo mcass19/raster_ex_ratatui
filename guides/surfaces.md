@@ -2,7 +2,7 @@
 
 A surface is the piece that puts an ExRatatui app on one particular display. It knows three things about the panel: how big it is, how its pixels are packed, and how bytes reach it. Everything between the app and those bytes (starting the app, folding cell diffs, rasterising glyphs and pixel regions, forwarding input) is done by `RasterExRatatui.Surface`.
 
-This guide builds a surface from scratch, then looks at the two consumers the library was designed against: the Goatmire name badge (a 1-bit e-ink panel) and a Raspberry Pi 4 driving an HDMI monitor.
+This guide builds a surface from scratch, then looks at the consumer the library was extracted from: the Goatmire name badge, a 1-bit e-ink panel.
 
 ## The data flow
 
@@ -55,14 +55,14 @@ children = [{Kiosk.Surface, spi_bus: "spidev0.0"}]
 
 ## Choosing font, scale, and format
 
-The grid is the panel size divided by the effective cell, which is the font's cell times `:scale`:
+The grid is the panel size divided by the effective cell, which is the font's cell times `:scale`. For a few panel sizes:
 
-| Panel | Font × scale | Cell | Grid |
-| ----- | ------------ | ---- | ---- |
-| 400×300 e-ink | 6×8 × 1 | 6×8 | 66×37 |
-| 480×320 SPI LCD | 6×8 × 1 | 6×8 | 80×40 |
-| 720×1280 DSI panel | 6×8 × 3 | 18×24 | 40×53 |
-| 1920×1080 HDMI | 6×8 × 3 | 18×24 | 106×45 |
+| Panel size | Font × scale | Cell | Grid |
+| ---------- | ------------ | ---- | ---- |
+| 400×300 (the badge) | 6×8 × 1 | 6×8 | 66×37 |
+| 480×320 | 6×8 × 1 | 6×8 | 80×40 |
+| 720×1280 | 6×8 × 3 | 18×24 | 40×53 |
+| 1920×1080 | 6×8 × 3 | 18×24 | 106×45 |
 
 `RasterExRatatui.Raster.grid_size/1` and `RasterExRatatui.Raster.font_size/1` report both; the surface creates the `ExRatatui.CellSession` with them, so pixel-mode widgets render bitmaps sized for the panel. See [Fonts](fonts.md) for bringing a different font and [Pixel Formats](pixel_formats.md) for the formats and palettes.
 
@@ -86,7 +86,7 @@ The surface does not read devices. Whatever does (an evdev keyboard, GPIO button
 RasterExRatatui.Surface.send_event(Kiosk.Surface, %ExRatatui.Event.Key{code: "down", kind: "press"})
 ```
 
-When the reader delivers its messages to the surface process itself (a process started in `init/1`), `c:RasterExRatatui.Surface.handle_info/2` translates them and returns `{:events, events, state}`. `RasterExRatatui.Input.Evdev` does the translation for keyboards; see [Linux Framebuffers](framebuffer.md) for the full keyboard setup.
+When the reader delivers its messages to the surface process itself (a process started in `init/1`), `c:RasterExRatatui.Surface.handle_info/2` translates them and returns `{:events, events, state}`. `RasterExRatatui.Input.Evdev` does the translation for keyboards; see [Linux Framebuffers](framebuffer.md) for a keyboard reader wired into a surface.
 
 Key codes must match what a terminal would send (lowercase strings, `kind: "press"`), because apps pattern-match on them.
 
@@ -98,7 +98,7 @@ Processes started in `init/1` with `start_link` are linked to the surface, and s
 
 ## Resizing
 
-`RasterExRatatui.Surface.resize/2` changes the panel size (an HDMI monitor hot-plugged at another resolution). The raster and the session are rebuilt, the app receives an `ExRatatui.Event.Resize`, and the next render repaints the whole panel.
+`RasterExRatatui.Surface.resize/2` changes the panel size (a display that comes back at another resolution). The raster and the session are rebuilt, the app receives an `ExRatatui.Event.Resize`, and the next render repaints the whole panel.
 
 ## Testing a surface
 
@@ -121,7 +121,3 @@ The badge already owns a screen process (it navigates between apps, dedupes refr
 Its e-ink panel only takes whole frames, and a refresh blocks for a moment, so the screen keeps the current 400×300 gray8 frame (`Raster.frame/1` of the empty raster to begin with) and folds each diff into it: `Raster.apply/2`, then every patch written over the frame with `RasterExRatatui.Patch.blit/4`. That costs only the changed rectangles instead of a full `frame/1` per render. Before folding, it drains every other diff already waiting in its mailbox, so the next refresh shows the latest frame rather than replaying the ones that queued up during the last one. The frame goes to its dithering + SPI driver as is.
 
 The screen traps exits: when the app crashes it draws a crash frame (a plain `CellSession` snapshot through the same raster) instead of dying. Two GPIO buttons become `%ExRatatui.Event.Key{}` events it sends to the server, and on shutdown it stops the server before closing the session.
-
-## Worked example: an HDMI monitor on a Raspberry Pi 4
-
-The Pi uses the surface process: `init/1` reads the framebuffer geometry with `RasterExRatatui.Framebuffer.info/2`, picks the format with `RasterExRatatui.Framebuffer.format_for/1`, opens `/dev/fb0`, and starts an `input_event` reader for the keyboard; `push/2` is one `RasterExRatatui.Framebuffer.write/2`; `handle_info/2` runs the keyboard messages through `RasterExRatatui.Input.Evdev`. The [Linux Framebuffers guide](framebuffer.md) walks through it.

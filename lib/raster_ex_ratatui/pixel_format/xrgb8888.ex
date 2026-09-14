@@ -1,6 +1,6 @@
 defmodule RasterExRatatui.PixelFormat.XRGB8888 do
   @moduledoc """
-  32-bit XRGB8888, little-endian: bytes are blue, green, red, then an unused byte written as `255`. The default depth of Linux framebuffers on HDMI (a Raspberry Pi's `/dev/fb0`, for instance).
+  32-bit XRGB8888, little-endian: bytes are blue, green, red, then an unused byte written as `255`. A common Linux framebuffer depth; `RasterExRatatui.Framebuffer.format_for/1` picks it from the device instead of assuming it.
 
   Cell colours resolve through a `RasterExRatatui.Palette` (named and indexed colours via its theme, `:reset` via its default foreground and background, `:bold` and `:reversed` applied); region pixels are packed as they come. Margins and skipped cells take the palette's default background.
 

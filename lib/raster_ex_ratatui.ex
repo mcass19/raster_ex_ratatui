@@ -1,6 +1,6 @@
 defmodule RasterExRatatui do
   @moduledoc """
-  Render [ExRatatui](https://hexdocs.pm/ex_ratatui) apps on pixel displays: e-ink panels, SPI LCDs, HDMI through a Linux framebuffer.
+  Render [ExRatatui](https://hexdocs.pm/ex_ratatui) apps on pixel displays such as e-ink panels, with helpers for Linux framebuffers.
 
   A terminal turns cells into pixels by itself. A bare panel does not, so something has to paint every cell's glyph in its colours, and blit the bitmaps that pixel-mode widgets (`ExRatatui.Widgets.Viewport3D`, `ExRatatui.Widgets.Image`) hand to an `ExRatatui.CellSession` created with a `:font_size`. This package is that something, in three layers:
 

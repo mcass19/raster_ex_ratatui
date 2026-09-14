@@ -1,6 +1,6 @@
 # RasterExRatatui
 
-Render [ExRatatui](https://github.com/mcass19/ex_ratatui) apps on pixel displays that are not terminals: e-ink panels, SPI LCDs, Linux framebuffers. A library published to Hex — not an application. Pure Elixir, no NIF of its own: it consumes the cell diffs and pixel regions an `ExRatatui.CellSession` produces and turns them into packed pixels.
+Render [ExRatatui](https://github.com/mcass19/ex_ratatui) apps on pixel displays that are not terminals, such as e-ink panels and Linux framebuffers. A library published to Hex — not an application. Pure Elixir, no NIF of its own: it consumes the cell diffs and pixel regions an `ExRatatui.CellSession` produces and turns them into packed pixels.
 
 The consumer-facing API guide lives in [usage-rules.md](usage-rules.md) (shipped with the package). This file is the contributor brief.
 

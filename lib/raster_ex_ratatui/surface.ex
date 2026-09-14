@@ -58,7 +58,7 @@ defmodule RasterExRatatui.Surface do
 
   ## Resize
 
-  `resize/2` changes the panel size (an HDMI monitor hot-plugged at another resolution): the raster and the session are rebuilt at the new grid, the app receives an `ExRatatui.Event.Resize`, and the next render repaints the whole panel.
+  `resize/2` changes the panel size (a display that comes back at another resolution): the raster and the session are rebuilt at the new grid, the app receives an `ExRatatui.Event.Resize`, and the next render repaints the whole panel.
   """
 
   alias RasterExRatatui.{Patch, Raster}

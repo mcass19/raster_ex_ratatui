@@ -8,7 +8,7 @@ defmodule RasterExRatatui.PixelFormat do
 
     * `RasterExRatatui.PixelFormat.Mono` — one gray byte per pixel for 1-bit panels (0 ink, 255 paper)
     * `RasterExRatatui.PixelFormat.RGB565` — 16-bit little-endian
-    * `RasterExRatatui.PixelFormat.XRGB8888` — 32-bit little-endian, the usual Linux framebuffer depth
+    * `RasterExRatatui.PixelFormat.XRGB8888` — 32-bit little-endian, a common Linux framebuffer depth
 
   ## Callbacks
 

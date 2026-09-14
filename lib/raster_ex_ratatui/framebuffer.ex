@@ -2,7 +2,7 @@ defmodule RasterExRatatui.Framebuffer do
   @moduledoc """
   Writes packed pixels to a Linux framebuffer device (`/dev/fbN`).
 
-  fbdev is the simplest way to put pixels on an HDMI monitor or a DSI panel from Elixir: the kernel exposes the display as a file, `/sys/class/graphics/fbN` describes its geometry, and writing bytes at the right offset lights the pixels. On a Raspberry Pi with the KMS driver the device comes from DRM's fbdev emulation.
+  fbdev needs no driver code on the Elixir side: the kernel exposes the display as a file, `/sys/class/graphics/fbN` describes its geometry, and writing bytes at the right offset lights the pixels.
 
       {:ok, fb} = Framebuffer.open("fb0")
       {:ok, format} = Framebuffer.format_for(fb.info)

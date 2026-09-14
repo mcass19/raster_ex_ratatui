@@ -1,6 +1,6 @@
 # RasterExRatatui Usage Rules
 
-RasterExRatatui renders [ExRatatui](https://hexdocs.pm/ex_ratatui) apps on pixel displays that are not terminals: e-ink panels, SPI LCDs, HDMI and DSI displays through a Linux framebuffer. It consumes `ExRatatui.CellSession` diffs (cells plus pixel regions) and produces packed pixels. It does not drive hardware itself: the consumer writes the bytes.
+RasterExRatatui renders [ExRatatui](https://hexdocs.pm/ex_ratatui) apps on pixel displays that are not terminals, such as e-ink panels and Linux framebuffers. It consumes `ExRatatui.CellSession` diffs (cells plus pixel regions) and produces packed pixels. It does not drive hardware itself: the consumer writes the bytes.
 
 It is **not** a terminal emulator, a font renderer, or a display driver, and apps need no changes to run on it. Build the app with `use ExRatatui.App` as for a terminal; the surface runs it.
 

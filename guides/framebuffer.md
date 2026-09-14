@@ -1,35 +1,41 @@
 # Linux Framebuffers
 
-A Linux framebuffer exposes a display as a file: `/dev/fb0` holds the pixels and `/sys/class/graphics/fb0` describes them. It is the shortest path from Elixir to an HDMI monitor or a DSI panel on a Raspberry Pi, with no C driver and no compositor. `RasterExRatatui.Framebuffer` wraps it, and this guide puts an ExRatatui app on a Pi 4's HDMI output with a USB keyboard, on Nerves.
+A Linux framebuffer exposes a display as a file: `/dev/fb0` holds the pixels and `/sys/class/graphics/fb0` describes them, so no driver code is needed on the Elixir side. `RasterExRatatui.Framebuffer` reads that geometry and writes patches to the device, and `RasterExRatatui.Input.Evdev` turns keyboard events into the key structs an ExRatatui app expects. This guide wires both into a surface.
+
+> #### Status {: .info}
+>
+> Both helpers are tested against a fake sysfs, a regular file standing in for `/dev/fb0`, and synthetic key events. They have not run on a device yet. The first hardware planned for them is a Raspberry Pi 4 with the official Touch Display 2, and this guide will gain the device-specific notes from that run.
 
 ## Check the device first
 
-Before writing any code, confirm the framebuffer exists and learn its geometry, from an IEx session on the device (over SSH):
+Before writing a surface, confirm the framebuffer exists and read its geometry, from an IEx session on the device:
 
 ```elixir
 File.ls!("/dev") |> Enum.filter(&String.starts_with?(&1, "fb"))
-RasterExRatatui.Framebuffer.info("fb0")
-#=> {:ok, %{width: 1920, height: 1080, bits_per_pixel: 16, stride: 3840}}
+{:ok, info} = RasterExRatatui.Framebuffer.info("fb0")
+#=> {:ok, %{width: ..., height: ..., bits_per_pixel: ..., stride: ...}}
 ```
 
-Then paint it red, to prove the path end to end. For 32 bits per pixel:
+Then paint it red to prove the path end to end. At 32 bits per pixel:
 
 ```elixir
-File.write!("/dev/fb0", :binary.copy(<<0, 0, 255, 255>>, 1920 * 1080))
+File.write!("/dev/fb0", :binary.copy(<<0, 0, 255, 255>>, info.width * info.height))
 ```
 
-and for 16 (`<<0, 248>>` is red in little-endian RGB565):
+and at 16 (`<<0, 248>>` is red in little-endian RGB565):
 
 ```elixir
-File.write!("/dev/fb0", :binary.copy(<<0, 248>>, 1920 * 1080))
+File.write!("/dev/fb0", :binary.copy(<<0, 248>>, info.width * info.height))
 ```
 
-On a Pi with the full KMS driver (`dtoverlay=vc4-kms-v3d`, the default on current Nerves systems), `/dev/fb0` comes from DRM's fbdev emulation, and its depth is whatever the kernel chose; always read `bits_per_pixel` instead of assuming it. If the device is missing, the firmware KMS driver (`dtoverlay=vc4-fkms-v3d`) is the fallback. The geometry follows the mode the monitor negotiated at boot; the kernel command line (`video=HDMI-A-1:1280x720@60`) pins it.
+The depth is whatever the kernel chose, so read `bits_per_pixel` instead of assuming it. `RasterExRatatui.Framebuffer.format_for/1` maps 16 to `RGB565` and 32 to `XRGB8888`, and returns `{:error, :unsupported}` for anything else.
 
 ## The surface
 
+A sketch of a surface for `/dev/fb0` with a keyboard read through [`input_event`](https://hex.pm/packages/input_event) (a dependency of the consumer, not of this library):
+
 ```elixir
-defmodule MyDevice.HdmiSurface do
+defmodule MyDevice.FramebufferSurface do
   use RasterExRatatui.Surface, app: MyDevice.Dashboard, scale: 3
 
   alias RasterExRatatui.Framebuffer
@@ -75,10 +81,10 @@ end
 
 ## Keep the console off the display
 
-The kernel's framebuffer console draws on the same device, so boot messages, a login prompt, or a blinking cursor can appear on top of the app. Two things keep it away:
+The kernel's framebuffer console draws on the same device, so boot messages, a login prompt, or a blinking cursor can appear on top of the app.
 
-- **Move the Erlang console to the serial port.** Nerves Pi systems attach IEx to the HDMI console (`tty1`) by default. In `config/target.exs`: `config :nerves, :erlinit, ctty: "ttyS0"` (with `enable_uart=1` in `config.txt`). IEx stays reachable over SSH and serial.
-- **Unbind fbcon.** `RasterExRatatui.Framebuffer.unbind_console/2` writes `0` to `/sys/class/vtconsole/vtcon1/bind`, which stops the console drawing on the framebuffer. It is best effort: on a kernel without a bound framebuffer console it returns an error that can be ignored.
+- **Unbind fbcon.** `RasterExRatatui.Framebuffer.unbind_console/2` writes `0` to `/sys/class/vtconsole/<console>/bind`, which stops the console drawing on the framebuffer. The framebuffer console is usually `"vtcon1"`; `/sys/class/vtconsole/*/name` tells them apart. It is best effort: on a kernel without that console it returns an error that can be ignored.
+- **Move the system console elsewhere.** On Nerves, erlinit's `ctty` option (`config :nerves, :erlinit, ctty: "ttyS0"`) puts IEx on a serial port instead of the display; it stays reachable over SSH.
 
 ## The keyboard
 
@@ -88,8 +94,8 @@ A keyboard plugged in after boot gets a new event device; a small process that p
 
 ## Performance
 
-On a desktop CPU a full 1080p repaint (106×45 cells at scale 3) rasterises in about 20 ms and a typical diff in well under a millisecond; a Pi 4 is several times slower, which is why the surface pushes patches rather than frames. Pixel regions cost one call per panel pixel they cover, so an animated `Viewport3D` is the heaviest thing on screen: keep its rect moderate (a quarter of the screen animates comfortably), or render it less often. Regions are capped by ex_ratatui at 1280 px on the long side and scaled nearest-neighbour onto larger rects.
+The surface pushes patches, so the steady-state cost follows what changed rather than the size of the panel. Pixel regions are the heaviest thing on screen: their cost grows with the panel pixels they cover, so an animated `Viewport3D` is cheaper in a moderate rect or rendered less often. ex_ratatui caps region bitmaps at 1280 px on the long side, and the raster scales them nearest-neighbour onto larger rects.
 
-## Other panels on the same path
+## Panels without a framebuffer
 
-Anything that shows up as `/dev/fbN` works the same way: the official Raspberry Pi DSI touch displays (enabled with their `dtoverlay` in `config.txt`, portrait by default), HDMI panels of any size, and SPI TFTs whose kernel driver provides a framebuffer. A panel without a kernel framebuffer (an SPI controller driven from Elixir with `Circuits.SPI`) implements `push/2` with its own window-write command instead.
+The helpers assume only `/dev/fbN` and sysfs. A panel the kernel does not expose as a framebuffer (an SPI controller driven from Elixir, an e-ink driver) implements `push/2` with its own write instead; see [Building a Surface](surfaces.md).
