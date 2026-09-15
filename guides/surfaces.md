@@ -7,12 +7,12 @@ This guide builds a surface from scratch, then looks at the consumer the library
 ## The data flow
 
 ```
-ExRatatui app ─ render ─▶ ExRatatui.Server ─ cell writer ─▶ %CellSession.Diff{ops, regions}
-                                                                     │
-                      Surface process: Raster.apply/2 ◀──────────────┘
-                                                                     │
-                                          [%Patch{}] ─▶ push/2 ─▶ the panel
-panel input ─▶ consumer code ─▶ Surface.send_event/2 ─▶ {:ex_ratatui_event, event}
+ExRatatui app ─ render ──> ExRatatui.Server ─ cell writer ──> %CellSession.Diff{ops, regions}
+                                                                      │
+                      Surface process: Raster.apply/2 <───────────────┘
+                                                                      │
+                                          [%Patch{}] ──> push/2 ──> the panel
+panel input ──> consumer code ──> Surface.send_event/2 ──> {:ex_ratatui_event, event}
 ```
 
 The app does not know it is on a panel. It renders widgets exactly as it would in a terminal; a `Viewport3D` that uses the Kitty protocol in a terminal arrives here as an RGB bitmap and is painted at the panel's native resolution.
@@ -116,8 +116,4 @@ end
 
 ## Worked example: the name badge
 
-The badge already owns a screen process (it navigates between apps, dedupes refreshes, and shows a crash frame), so it uses the pure core instead of the surface process. Its raster is `Raster.new(size: {400, 300}, format: RasterExRatatui.PixelFormat.Mono)`, a 66×37 grid; it creates the session with `Raster.font_size/1` and starts the app server, linked, with a writer that sends every diff to the screen process.
-
-Its e-ink panel only takes whole frames, and a refresh blocks for a moment, so the screen keeps the current 400×300 gray8 frame (`Raster.frame/1` of the empty raster to begin with) and folds each diff into it: `Raster.apply/2`, then every patch written over the frame with `RasterExRatatui.Patch.blit/4`. That costs only the changed rectangles instead of a full `frame/1` per render. Before folding, it drains every other diff already waiting in its mailbox, so the next refresh shows the latest frame rather than replaying the ones that queued up during the last one. The frame goes to its dithering + SPI driver as is.
-
-The screen traps exits: when the app crashes it draws a crash frame (a plain `CellSession` snapshot through the same raster) instead of dying. Two GPIO buttons become `%ExRatatui.Event.Key{}` events it sends to the server, and on shutdown it stops the server before closing the session.
+The [Goatmire name badge](https://github.com/mcass19/name_badge/tree/raster_ex_ratatui) already owns a screen process that navigates between apps, dedupes refreshes, and shows a crash frame, so it skips the surface process and uses the pure core. It creates the session from `Raster.grid_size/1` and `Raster.font_size/1` of a 400×300 `Mono` raster, starts the app server linked with a writer that sends every diff to the screen, and keeps a gray8 frame that it updates with `Raster.apply/2` and `RasterExRatatui.Patch.blit/4`, draining queued diffs first so each e-ink refresh shows the latest frame. Two GPIO buttons become `%ExRatatui.Event.Key{}` events, and an app crash draws a crash frame through the same raster instead of taking the screen down.

@@ -94,7 +94,7 @@ A keyboard plugged in after boot gets a new event device; a small process that p
 
 ## Performance
 
-The surface pushes patches, so the steady-state cost follows what changed rather than the size of the panel. Pixel regions are the heaviest thing on screen: their cost grows with the panel pixels they cover, so an animated `Viewport3D` is cheaper in a moderate rect or rendered less often. ex_ratatui caps region bitmaps at 1280 px on the long side, and the raster scales them nearest-neighbour onto larger rects.
+The surface pushes patches, so the steady-state cost follows what changed rather than the size of the panel. Pixel regions are the exception, since their cost grows with the panel pixels they cover (see [Pixel Formats](pixel_formats.md#writing-a-format)): an animated `Viewport3D` is cheaper in a moderate rect or rendered less often.
 
 ## Panels without a framebuffer
 

@@ -19,7 +19,7 @@ cd raster_ex_ratatui
 
 - **Elixir** 1.17+ and **Erlang/OTP** 26+.
 - No device: the library is pure Elixir, and every test runs on the host against a headless `ExRatatui.CellSession`.
-- While ex_ratatui is a path dependency (`../ex_ratatui`), a **Rust** toolchain and `EX_RATATUI_BUILD=true` are needed so its NIF builds from source.
+- No Rust toolchain: ex_ratatui ships a precompiled NIF. Make sure `EX_RATATUI_BUILD` is not set in the environment, or ex_ratatui will build its NIF from source instead.
 
 3. Fetch dependencies:
 

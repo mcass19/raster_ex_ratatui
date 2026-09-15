@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-15
+
 ### Added
 
 - **First release.** `raster_ex_ratatui` renders `ExRatatui` apps on pixel displays that are not terminals, on top of `ExRatatui.CellSession` pixel regions.
@@ -17,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RasterExRatatui.Framebuffer`: Linux fbdev geometry from sysfs, stride-aware patch and frame writes, blanking, and console unbinding.
 - `RasterExRatatui.Input.Evdev`: a pure evdev key translator producing `ExRatatui.Event.Key` structs with shift, ctrl, alt, super, and caps lock, for a US layout or a custom map.
 - `RasterExRatatui.Telemetry`: surface start/stop, rasterisation and push spans, and input forwarding events.
-- Guides (Building a Surface, Fonts, Pixel Formats, Linux Framebuffers, Telemetry), a cheatsheet, usage rules, and a headless snapshot example.
+- Guides (Building a Surface, Fonts, Pixel Formats, Linux Framebuffers, Telemetry), usage rules, a headless snapshot example, and a rasterisation benchmark.
 
-[Unreleased]: https://github.com/mcass19/raster_ex_ratatui/commits/main
+[Unreleased]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/mcass19/raster_ex_ratatui/releases/tag/v0.1.0

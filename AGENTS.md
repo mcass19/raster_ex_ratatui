@@ -12,11 +12,11 @@ The consumer-facing API guide lives in [usage-rules.md](usage-rules.md) (shipped
   - `RasterExRatatui.Grid` (cell map + region list) and `RasterExRatatui.Raster` (grid → `Patch` list or a full frame)
 - **Surface** — `use RasterExRatatui.Surface`: a supervised process that owns the ExRatatui server on a `{:cell_session, ...}` transport, folds diffs through `Raster`, and calls the consumer's `push/2`. Input is the consumer's: it hands `ExRatatui.Event` structs to the surface, which forwards them to the server
 - **Device helpers** — `RasterExRatatui.Framebuffer` (Linux fbdev geometry + writes, file access injectable) and `RasterExRatatui.Input.Evdev` (pure evdev key → `ExRatatui.Event.Key` translator; the library does not depend on `input_event`)
-- **`examples/`** — a headless snapshot script (not part of the library's build or coverage)
+- **`examples/`** — a headless snapshot script and a rasterisation benchmark (not part of the library's build or coverage)
 
 ## Build
 
-- `mix compile`. Until pixel regions ship in a released ex_ratatui, the dep is `{:ex_ratatui, path: "../ex_ratatui"}` and must be built from source: keep `EX_RATATUI_BUILD=true` set (the local `mise.toml` does it) for every mix command, otherwise a precompiled NIF without region support loads silently
+- `mix compile`. ex_ratatui is a hex dependency with a precompiled NIF; run mix commands with `EX_RATATUI_BUILD` unset (`env -u EX_RATATUI_BUILD mix ...` when a shell exports it for the sibling ex_ratatui checkout), otherwise its NIF builds from source
 
 ## Testing
 

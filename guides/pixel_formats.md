@@ -81,4 +81,4 @@ end
 
 `c:RasterExRatatui.PixelFormat.cell_paints/2` may return `{:checker, even, odd}` instead of bytes for a side of the cell, to simulate a tone the panel cannot show; the raster resolves it by the parity of each pixel's panel position. `c:RasterExRatatui.PixelFormat.rgb_pixel/6` receives the position for the same reason (ordered dithering) and can ignore it otherwise.
 
-Region pixels are the expensive path, one `rgb_pixel/6` call per panel pixel a region covers (roughly 140 ns each on a desktop CPU), so keep that function small.
+Region pixels are the expensive path, one `rgb_pixel/6` call per panel pixel a region covers, so keep that function small. ex_ratatui caps region bitmaps at 1280 px on the long side and the raster scales them nearest-neighbour onto larger rects, so the cost is bounded by the rect on the panel, not the scene.

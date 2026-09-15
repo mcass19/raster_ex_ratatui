@@ -7,8 +7,6 @@
 
 Render [ExRatatui](https://github.com/mcass19/ex_ratatui) apps on pixel displays such as e-ink panels, with helpers for Linux framebuffers.
 
-<!-- .github/demo.gif: the Goatmire badge running on raster_ex_ratatui -->
-
 A terminal paints glyphs for us. A panel with nothing but pixels does not, so something has to turn every cell (a symbol, a foreground, a background) into pixels, and blit the bitmaps that `Viewport3D` and `Image` render. `RasterExRatatui` is that something. It sits on top of an `ExRatatui.CellSession`, keeps the cell grid and the pixel regions of the current frame, and hands the device only the rectangles that changed, already packed in the panel's pixel format.
 
 ```
@@ -31,38 +29,47 @@ ExRatatui app ──> ExRatatui.Server ──> CellSession diff (cells + regions
 - **Device helpers** — `Framebuffer` for Linux fbdev (geometry from sysfs, stride-aware writes) and `Input.Evdev` to turn keyboard events into `ExRatatui.Event.Key` structs.
 - **Pure core** — `Raster`, `Grid`, fonts, and formats are plain functions, usable from any process that already owns its device.
 
-## Status
-
-The first consumer is the Goatmire name badge, a 400×300 1-bit e-ink panel. Its screen is built on the pure core (`Raster` and `Patch.blit/4`) and tested on the host against the frame it sends to the panel. The `Framebuffer` and `Input.Evdev` helpers are tested against a fake sysfs and synthetic key events but have not run on a device yet; a Raspberry Pi 4 with the official Touch Display 2 is the first hardware planned for them.
-
 ## Quick start
 
-```elixir
-defmodule MyDevice.Surface do
-  use RasterExRatatui.Surface, app: MyDevice.App, scale: 3
+The app needs no change: it is a plain `use ExRatatui.App` (or `ExRatatui.run/2`) that renders widgets exactly as it would in a terminal, so build and try it there first. Putting it on a panel is then one module, the surface, that answers three questions about the display: how big it is, how its pixels are packed, and how bytes reach it.
 
-  alias RasterExRatatui.Framebuffer
+1. **Pick the format and scale.** `Mono` for 1-bit panels, `RGB565` or `XRGB8888` for colour. `scale:` magnifies the built-in 6×8 font so the grid stays readable on a large panel: a 720×1280 display at scale 3 gives 40×53 cells.
+2. **Write the surface.** `init/1` opens the device and returns its geometry, `push/2` writes the rectangles that changed. On a Linux framebuffer (a Raspberry Pi with a display) the helpers do both:
 
-  @impl true
-  def init(_opts) do
-    {:ok, fb} = Framebuffer.open("fb0")
-    {:ok, format} = Framebuffer.format_for(fb.info)
-    {:ok, [size: {fb.info.width, fb.info.height}, format: format], fb}
-  end
+   ```elixir
+   defmodule MyDevice.Surface do
+     use RasterExRatatui.Surface, app: MyDevice.App, scale: 3
 
-  @impl true
-  def push(patches, fb) do
-    :ok = Framebuffer.write(fb, patches)
-    fb
-  end
-end
-```
+     alias RasterExRatatui.Framebuffer
 
-`MyDevice.App` is any `ExRatatui.App`, unchanged. Add `MyDevice.Surface` to a supervision tree and the app is on the display; send it input with `RasterExRatatui.Surface.send_event/2`.
+     @impl true
+     def init(_opts) do
+       {:ok, fb} = Framebuffer.open("fb0")
+       {:ok, format} = Framebuffer.format_for(fb.info)
+       {:ok, [size: {fb.info.width, fb.info.height}, format: format], fb}
+     end
+
+     @impl true
+     def push(patches, fb) do
+       :ok = Framebuffer.write(fb, patches)
+       fb
+     end
+   end
+   ```
+
+   A panel the kernel does not expose as a framebuffer (an SPI LCD, an e-ink controller) writes each patch with its own driver in `push/2` instead.
+3. **Supervise it and wire input.** Add `MyDevice.Surface` to the supervision tree and the app is on the display. Whatever reads the hardware (a keyboard, GPIO buttons) turns its events into `ExRatatui.Event` structs and hands them over with `RasterExRatatui.Surface.send_event/2`; `RasterExRatatui.Input.Evdev` does the translation for evdev keyboards.
+4. **Test on the host.** A surface whose `push/2` sends patches to the test process drives the real app without a device, and `RasterExRatatui.Raster.frame/1` shows exactly what the panel would.
+
+[Building a Surface](guides/surfaces.md) walks through each step, including panels that only take whole frames, slow refreshes, crashes, and resizing. [Linux Framebuffers](guides/framebuffer.md) covers `/dev/fb0`, keeping the kernel console off the display, and keyboards. A device already driven from its own process (the name badge is one) can skip the surface and fold diffs with `RasterExRatatui.Raster` directly.
 
 ## Examples
 
-A headless snapshot script lives under [`examples/`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples). See the [catalog](https://github.com/mcass19/raster_ex_ratatui/blob/main/examples/README.md).
+- [**Headless snapshot**](https://github.com/mcass19/raster_ex_ratatui/blob/main/examples/headless/snapshot.exs) — the whole pipeline in one file, with no device or terminal: a dashboard with a `Viewport3D` cube rasterised as a colour frame (`XRGB8888`, scale 2) and as a 1-bit e-ink frame (`Mono`), written as PPM and PGM images. `mix run examples/headless/snapshot.exs` from a checkout.
+- [**Goatmire name badge**](https://github.com/mcass19/name_badge/tree/raster_ex_ratatui) — the consumer the library was extracted from: a 400×300 1-bit e-ink panel on Nerves, driven from the badge's own screen process with the pure core (`Raster.apply/2` and `Patch.blit/4`), with a crash frame and two GPIO buttons as key events. A branch of the [name_badge](https://github.com/protolux-electronics/name_badge) fork.
+- **Raspberry Pi 4 with the Touch Display 2** — a Linux framebuffer surface (`/dev/fb0`, a USB keyboard through [`input_event`](https://hex.pm/packages/input_event)) as a Nerves project under `examples/`. In progress: it lands after its first device run, and [Linux Framebuffers](guides/framebuffer.md) already shows the surface it uses.
+
+The [examples catalog](examples/README.md) says what to look at in each.
 
 ## Guides
 
@@ -73,7 +80,6 @@ A headless snapshot script lives under [`examples/`](https://github.com/mcass19/
 | [Pixel Formats](guides/pixel_formats.md) | `Mono` tone rules and dithering, colour palettes, writing a format |
 | [Linux Framebuffers](guides/framebuffer.md) | `Framebuffer` and `Input.Evdev`: device geometry, writes, the kernel console, and keyboards |
 | [Telemetry](guides/telemetry.md) | Rasterisation, push, and input events with a `Telemetry.Metrics` example |
-| [Cheatsheet](guides/cheatsheet.cheatmd) | Every option and call on one page |
 
 ## Ecosystem
 

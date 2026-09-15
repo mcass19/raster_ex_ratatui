@@ -1,7 +1,7 @@
 # Rasterisation cost on a 1080p panel: a 106×45 grid of 18×24 cells
 # (Default6x8 at scale 3) packed as XRGB8888.
 #
-#   mix run bench/raster_bench.exs
+#   mix run examples/bench/raster_bench.exs
 #
 # Pure computation, no terminal or device involved.
 

@@ -101,14 +101,12 @@ defmodule RasterExRatatui.MixProject do
         "guides/pixel_formats.md": [title: "Pixel Formats"],
         "guides/framebuffer.md": [title: "Linux Framebuffers"],
         "guides/telemetry.md": [title: "Telemetry"],
-        "guides/cheatsheet.cheatmd": [title: "Cheatsheet"],
         "CONTRIBUTING.md": [title: "Contributing"],
         "CHANGELOG.md": [title: "Changelog"]
       ],
       groups_for_extras: [
-        Guides: ~r"guides/.+\.md",
-        Cheatsheets: ~r"guides/.+\.cheatmd",
-        Introduction: ["examples/README.md", "usage-rules.md"]
+        Introduction: ["examples/README.md", "usage-rules.md"],
+        Guides: ~r"guides/.+\.md"
       ],
       groups_for_modules: [
         Surface: [
