@@ -61,12 +61,12 @@ The app needs no change: it is a plain `use ExRatatui.App` (or `ExRatatui.run/2`
 3. **Supervise it and wire input.** Add `MyDevice.Surface` to the supervision tree and the app is on the display. Whatever reads the hardware (a keyboard, GPIO buttons) turns its events into `ExRatatui.Event` structs and hands them over with `RasterExRatatui.Surface.send_event/2`; `RasterExRatatui.Input.Evdev` does the translation for evdev keyboards.
 4. **Test on the host.** A surface whose `push/2` sends patches to the test process drives the real app without a device, and `RasterExRatatui.Raster.frame/1` shows exactly what the panel would.
 
-[Building a Surface](guides/surfaces.md) walks through each step, including panels that only take whole frames, slow refreshes, crashes, and resizing. [Linux Framebuffers](guides/framebuffer.md) covers `/dev/fb0`, keeping the kernel console off the display, and keyboards. A device already driven from its own process (the name badge is one) can skip the surface and fold diffs with `RasterExRatatui.Raster` directly.
+[Building a Surface](guides/surfaces.md) walks through each step, including panels that only take whole frames, slow refreshes, crashes, and resizing. [Linux Framebuffers](guides/framebuffer.md) covers `/dev/fb0`, keeping the kernel console off the display, and keyboards. A device already driven from its own process can skip the surface and fold diffs with `RasterExRatatui.Raster` directly.
 
 ## Examples
 
 - [**Headless snapshot**](https://github.com/mcass19/raster_ex_ratatui/blob/main/examples/headless/snapshot.exs) — the whole pipeline in one file, with no device or terminal: a dashboard with a `Viewport3D` cube rasterised as a colour frame (`XRGB8888`, scale 2) and as a 1-bit e-ink frame (`Mono`), written as PPM and PGM images. `mix run examples/headless/snapshot.exs` from a checkout.
-- [**Goatmire name badge**](https://github.com/mcass19/name_badge/tree/raster_ex_ratatui) — the consumer the library was extracted from: a 400×300 1-bit e-ink panel on Nerves, driven from the badge's own screen process with the pure core (`Raster.apply/2` and `Patch.blit/4`), with a crash frame and two GPIO buttons as key events. A branch of the [name_badge](https://github.com/protolux-electronics/name_badge) fork.
+- [**Goatmire name badge**](https://github.com/mcass19/name_badge/pull/3) — a consumer of the pure core: a 400×300 1-bit e-ink panel on Nerves, driven from the device's existing screen process with `Raster.apply/2` and `Patch.blit/4`, with a crash frame and two GPIO buttons as key events. A pull request on the [name_badge](https://github.com/protolux-electronics/name_badge) fork.
 - **Raspberry Pi 4 with the Touch Display 2** — a Linux framebuffer surface (`/dev/fb0`, a USB keyboard through [`input_event`](https://hex.pm/packages/input_event)) as a Nerves project under `examples/`. In progress: it lands after its first device run, and [Linux Framebuffers](guides/framebuffer.md) already shows the surface it uses.
 
 The [examples catalog](examples/README.md) says what to look at in each.
@@ -75,7 +75,7 @@ The [examples catalog](examples/README.md) says what to look at in each.
 
 | Guide | Description |
 |-------|-------------|
-| [Building a Surface](guides/surfaces.md) | The contract: geometry, push, input, crashes, testing, and the name badge as a worked example |
+| [Building a Surface](guides/surfaces.md) | The contract: geometry, push, input, crashes, testing, and a 1-bit e-ink consumer as a worked example |
 | [Fonts](guides/fonts.md) | The glyph layout, the built-in 6×8 font, scale, and bringing a font |
 | [Pixel Formats](guides/pixel_formats.md) | `Mono` tone rules and dithering, colour palettes, writing a format |
 | [Linux Framebuffers](guides/framebuffer.md) | `Framebuffer` and `Input.Evdev`: device geometry, writes, the kernel console, and keyboards |

@@ -7,7 +7,7 @@ The consumer-facing API guide lives in [usage-rules.md](usage-rules.md) (shipped
 ## Architecture
 
 - **Pure core** (no processes, fully testable on the host):
-  - `RasterExRatatui.Font` behaviour + `Font.Default6x8` (the badge font), `Font.Art` (compile-time ASCII-art parser), `Font.Generated` (braille/eighths/quadrants for any cell size)
+  - `RasterExRatatui.Font` behaviour + `Font.Default6x8` (the built-in font), `Font.Art` (compile-time ASCII-art parser), `Font.Generated` (braille/eighths/quadrants for any cell size)
   - `RasterExRatatui.Palette` (colour terms → RGB) and `RasterExRatatui.PixelFormat` behaviour with `Mono` (gray8, 1-bit tone rules + Bayer dither), `RGB565`, `XRGB8888`
   - `RasterExRatatui.Grid` (cell map + region list) and `RasterExRatatui.Raster` (grid → `Patch` list or a full frame)
 - **Surface** — `use RasterExRatatui.Surface`: a supervised process that owns the ExRatatui server on a `{:cell_session, ...}` transport, folds diffs through `Raster`, and calls the consumer's `push/2`. Input is the consumer's: it hands `ExRatatui.Event` structs to the surface, which forwards them to the server

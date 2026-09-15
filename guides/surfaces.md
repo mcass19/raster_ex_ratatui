@@ -2,7 +2,7 @@
 
 A surface is the piece that puts an ExRatatui app on one particular display. It knows three things about the panel: how big it is, how its pixels are packed, and how bytes reach it. Everything between the app and those bytes (starting the app, folding cell diffs, rasterising glyphs and pixel regions, forwarding input) is done by `RasterExRatatui.Surface`.
 
-This guide builds a surface from scratch, then looks at the consumer the library was extracted from: the Goatmire name badge, a 1-bit e-ink panel.
+This guide builds a surface from scratch, then looks at a consumer that uses the pure core instead: a 1-bit e-ink name badge.
 
 ## The data flow
 
@@ -59,7 +59,7 @@ The grid is the panel size divided by the effective cell, which is the font's ce
 
 | Panel size | Font × scale | Cell | Grid |
 | ---------- | ------------ | ---- | ---- |
-| 400×300 (the badge) | 6×8 × 1 | 6×8 | 66×37 |
+| 400×300 (a small e-ink panel) | 6×8 × 1 | 6×8 | 66×37 |
 | 480×320 | 6×8 × 1 | 6×8 | 80×40 |
 | 720×1280 | 6×8 × 3 | 18×24 | 40×53 |
 | 1920×1080 | 6×8 × 3 | 18×24 | 106×45 |
@@ -92,7 +92,7 @@ Key codes must match what a terminal would send (lowercase strings, `kind: "pres
 
 ## Crashes and restarts
 
-The surface process links to the app server. If the app crashes, the surface exits with the same reason and its supervisor restarts it, which starts a fresh app and repaints the panel. The generated child spec is `restart: :transient`, as for `ExRatatui.App`, so an app that quits with `{:stop, state}` stays stopped; a kiosk that must always come back overrides `child_spec/1` with `restart: :permanent`. If the surface stops, it stops the app first, waiting up to `:shutdown_timeout` (4 seconds by default) for the app's own `terminate/2` before killing it, so the surface's `c:RasterExRatatui.Surface.terminate/2` still runs within a supervisor's default shutdown budget. There is no crash screen by default; a consumer that wants one (the badge shows a static frame) can trap the exit in its own process and draw it.
+The surface process links to the app server. If the app crashes, the surface exits with the same reason and its supervisor restarts it, which starts a fresh app and repaints the panel. The generated child spec is `restart: :transient`, as for `ExRatatui.App`, so an app that quits with `{:stop, state}` stays stopped; a kiosk that must always come back overrides `child_spec/1` with `restart: :permanent`. If the surface stops, it stops the app first, waiting up to `:shutdown_timeout` (4 seconds by default) for the app's own `terminate/2` before killing it, so the surface's `c:RasterExRatatui.Surface.terminate/2` still runs within a supervisor's default shutdown budget. There is no crash screen by default; a consumer that wants one (a static frame, say) can trap the exit in its own process and draw it.
 
 Processes started in `init/1` with `start_link` are linked to the surface, and since the surface traps exits their `{:EXIT, pid, reason}` messages arrive in `handle_info/2`; handle them there.
 
@@ -114,6 +114,6 @@ test "the dashboard shows the title" do
 end
 ```
 
-## Worked example: the name badge
+## Worked example: an e-ink name badge
 
-The [Goatmire name badge](https://github.com/mcass19/name_badge/tree/raster_ex_ratatui) already owns a screen process that navigates between apps, dedupes refreshes, and shows a crash frame, so it skips the surface process and uses the pure core. It creates the session from `Raster.grid_size/1` and `Raster.font_size/1` of a 400×300 `Mono` raster, starts the app server linked with a writer that sends every diff to the screen, and keeps a gray8 frame that it updates with `Raster.apply/2` and `RasterExRatatui.Patch.blit/4`, draining queued diffs first so each e-ink refresh shows the latest frame. Two GPIO buttons become `%ExRatatui.Event.Key{}` events, and an app crash draws a crash frame through the same raster instead of taking the screen down.
+The [Goatmire name badge](https://github.com/mcass19/name_badge/pull/3), a 400×300 1-bit e-ink panel on Nerves, already owns a screen process that navigates between apps, dedupes refreshes, and shows a crash frame, so it skips the surface process and uses the pure core. It creates the session from `Raster.grid_size/1` and `Raster.font_size/1` of a 400×300 `Mono` raster, starts the app server linked with a writer that sends every diff to the screen, and keeps a gray8 frame that it updates with `Raster.apply/2` and `RasterExRatatui.Patch.blit/4`, draining queued diffs first so each e-ink refresh shows the latest frame. Two GPIO buttons become `%ExRatatui.Event.Key{}` events, and an app crash draws a crash frame through the same raster instead of taking the screen down.

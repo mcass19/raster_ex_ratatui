@@ -1,6 +1,6 @@
 defmodule RasterExRatatui.Font.Default6x8 do
   @moduledoc """
-  The built-in 6×8 monospace bitmap font, drawn for the Goatmire name badge's 400×300 e-ink panel and readable on any panel with an integer `scale:`.
+  The built-in 6×8 monospace bitmap font, drawn for a 400×300 1-bit e-ink panel and readable on any panel with an integer `scale:`.
 
   Each cell is 6×8 pixels: text glyphs are drawn 5×7 with one blank column on the right (inter-cell spacing) and one blank row at the bottom (inter-line spacing); box-drawing and block glyphs fill all 48 pixels so they join across cells.
 
