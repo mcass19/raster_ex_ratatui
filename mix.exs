@@ -46,10 +46,7 @@ defmodule RasterExRatatui.MixProject do
 
   defp deps do
     [
-      # Pixel regions are unreleased: build ex_ratatui from source (EX_RATATUI_BUILD=true),
-      # which needs rustler. Switch back to hex (~> 0.14) once released.
-      {:ex_ratatui, path: "../ex_ratatui"},
-      {:rustler, "~> 0.38", runtime: false},
+      {:ex_ratatui, "~> 0.14"},
       {:telemetry, "~> 1.0"},
 
       # Test
