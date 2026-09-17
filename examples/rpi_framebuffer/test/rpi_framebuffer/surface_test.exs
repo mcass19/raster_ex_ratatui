@@ -71,12 +71,33 @@ defmodule RpiFramebuffer.SurfaceTest do
       Process.flag(:trap_exit, true)
 
       assert {:error, {:framebuffer, {:enoent, _path}}} =
-               Surface.start_link(root: root, framebuffer: "fb7", keyboard: false)
+               Surface.start_link(
+                 root: root,
+                 framebuffer: "fb7",
+                 framebuffer_timeout: 500,
+                 keyboard: false
+               )
 
       panel(root, "360,320", 24, 1080)
 
       assert {:error, {:framebuffer, :unsupported}} =
                Surface.start_link(root: root, keyboard: false)
+    end
+
+    test "is waited for when its driver loads after the application", %{root: root} do
+      File.rm_rf!(Path.join(root, "sys/class/graphics/fb0"))
+      test = self()
+
+      spawn_link(fn ->
+        Process.sleep(400)
+        panel(root, "360,320", 16, 720)
+        send(test, :panel_up)
+      end)
+
+      surface = start_supervised!({Surface, root: root, keyboard: false})
+
+      assert_received :panel_up
+      assert Raster.size(RasterExRatatui.Surface.raster(surface)) == {360, 320}
     end
 
     test "survives a kernel without that console", %{root: root} do

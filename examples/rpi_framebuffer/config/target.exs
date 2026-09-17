@@ -7,6 +7,7 @@ import Config
 #
 #   * `scale:` - integer font scale; the default is derived from the panel size
 #   * `framebuffer:` - default "fb0"
+#   * `framebuffer_timeout:` - milliseconds to wait for the framebuffer at boot, default 30_000
 #   * `console:` - the framebuffer console to unbind, default "vtcon1"
 #   * `keyboard:` - false to skip looking for a USB keyboard
 config :rpi_framebuffer, RpiFramebuffer.Surface, []

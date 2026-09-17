@@ -4,6 +4,8 @@ defmodule RpiFramebuffer.Surface do
 
   Nothing about the panel is configured. At startup the surface reads the framebuffer's geometry from sysfs, picks the pixel format from its depth (the KMS fbdev emulation gives the DSI Touch Display 2 16 bits per pixel and most HDMI monitors 32), and derives the font scale from the size (`default_scale/1`). It then detaches the kernel's framebuffer console so no cursor blinks over the app, and looks for a keyboard.
 
+  The display drivers are kernel modules that load while the system boots, so `/dev/fb0` can show up seconds after the application starts. `init/1` waits for it (`:framebuffer_timeout`) instead of failing on the first look.
+
   A keyboard that is missing at boot, or unplugged later, is looked for again every two seconds. Its reader is linked to the surface and grabs the device, so keys reach the dashboard and nothing else.
 
   Patches go to the device as they come: `push/2` is one positioned write per patch row, in a single `:file.pwrite/2`.
@@ -14,6 +16,7 @@ defmodule RpiFramebuffer.Surface do
 
     * `:scale` — integer font scale, default `default_scale/1` of the panel size
     * `:framebuffer` — the framebuffer name, default `"fb0"`
+    * `:framebuffer_timeout` — how long to wait for the framebuffer to appear, in milliseconds, default `30_000`
     * `:console` — the framebuffer console to unbind, default `"vtcon1"`
     * `:keyboard` — whether to look for a keyboard, default `true`
     * `:spin_ms` — passed to the dashboard, see `RpiFramebuffer.Dashboard.Showcase`
@@ -29,6 +32,8 @@ defmodule RpiFramebuffer.Surface do
   alias RasterExRatatui.Input.Evdev
 
   @keyboard_retry_ms 2_000
+  @framebuffer_timeout_ms 30_000
+  @framebuffer_retry_ms 250
 
   # The library font's cell width, and the fewest columns the long side of
   # the panel should keep.
@@ -39,7 +44,10 @@ defmodule RpiFramebuffer.Surface do
   def init(opts) do
     fs_opts = Keyword.take(opts, [:root])
 
-    with {:ok, fb} <- Framebuffer.open(Keyword.get(opts, :framebuffer, "fb0"), fs_opts),
+    name = Keyword.get(opts, :framebuffer, "fb0")
+    timeout = Keyword.get(opts, :framebuffer_timeout, @framebuffer_timeout_ms)
+
+    with {:ok, fb} <- open_framebuffer(name, fs_opts, timeout),
          {:ok, format} <- Framebuffer.format_for(fb.info) do
       size = {fb.info.width, fb.info.height}
       scale = Keyword.get(opts, :scale) || default_scale(size)
@@ -68,6 +76,26 @@ defmodule RpiFramebuffer.Surface do
       {:ok, config, state}
     else
       {:error, reason} -> {:stop, {:framebuffer, reason}}
+    end
+  end
+
+  # Only a missing device is worth waiting for; a depth the library cannot
+  # pack will not get better.
+  defp open_framebuffer(name, fs_opts, remaining) do
+    case Framebuffer.open(name, fs_opts) do
+      {:ok, fb} ->
+        {:ok, fb}
+
+      {:error, _reason} when remaining > 0 ->
+        if remaining == @framebuffer_timeout_ms or rem(remaining, 5_000) == 0 do
+          Logger.info("RpiFramebuffer.Surface: waiting for #{name}")
+        end
+
+        Process.sleep(@framebuffer_retry_ms)
+        open_framebuffer(name, fs_opts, remaining - @framebuffer_retry_ms)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
