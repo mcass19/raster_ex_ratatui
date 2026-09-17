@@ -50,10 +50,16 @@ defmodule RpiFramebuffer.MixProject do
       {:nerves_pack, "~> 0.7.1", targets: @all_targets},
 
       # Dependencies for specific targets. Only :rpi4 has run on hardware.
-      {:nerves_system_rpi0_2, "~> 2.1", runtime: false, targets: :rpi0_2},
-      {:nerves_system_rpi3, "~> 2.1", runtime: false, targets: :rpi3},
-      {:nerves_system_rpi4, "~> 2.1", runtime: false, targets: :rpi4},
-      {:nerves_system_rpi5, "~> 2.1", runtime: false, targets: :rpi5}
+      #
+      # Held at 2.0.x (Linux 6.12, OTP 28) on purpose. The 2.1.x systems moved to
+      # Linux 6.18, where the Touch Display 2 overlay needs the pwm-backlight
+      # driver, and their kernel config does not build it (CONFIG_BACKLIGHT_PWM):
+      # the DSI panel never finishes probing and /dev/fb0 never appears. HDMI is
+      # not affected. Build with an Elixir compiled for OTP 28 (see the README).
+      {:nerves_system_rpi0_2, "~> 2.0.0", runtime: false, targets: :rpi0_2},
+      {:nerves_system_rpi3, "~> 2.0.0", runtime: false, targets: :rpi3},
+      {:nerves_system_rpi4, "~> 2.0.0", runtime: false, targets: :rpi4},
+      {:nerves_system_rpi5, "~> 2.0.0", runtime: false, targets: :rpi5}
     ]
   end
 

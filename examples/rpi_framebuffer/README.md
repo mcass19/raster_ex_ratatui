@@ -43,14 +43,26 @@ runs the whole project on the host, surface included.
 
 ## Build the firmware
 
+The Nerves systems are held at 2.0.x, which run OTP 28, and Nerves only builds a release with an Elixir compiled for the target's OTP major. `elixir --version` says which one is in use ("compiled with Erlang/OTP 28"). With [mise](https://mise.jdx.dev), for this directory:
+
+```sh
+mise use erlang@28 elixir@1.19.4-otp-28
+mix local.hex --force && mix local.rebar --force
+mix archive.install hex nerves_bootstrap
+```
+
+Then:
+
 ```sh
 export MIX_TARGET=rpi4
 mix deps.get
 mix firmware
-mix burn              # first time, with the microSD in a reader
+mix burn              # first time, with the microSD in a reader, then move the card to the Pi
 ```
 
 The targets are `rpi4`, `rpi5`, `rpi3`, and `rpi0_2`; only `rpi4` has run on hardware. The firmware needs an SSH public key in `~/.ssh` at build time (see `config/target.exs`).
+
+Why 2.0.x: the 2.1.x systems moved to Linux 6.18, where the Touch Display 2 overlay drives the backlight through `pwm-backlight`, and their kernel config does not build that driver (`CONFIG_BACKLIGHT_PWM`). The DSI panel then never finishes probing (`mipi-dsi fe700000.dsi.0: deferred probe pending` in `dmesg`, an empty `/sys/class/backlight`) and `/dev/fb0` never appears. HDMI is not affected, so a project without a DSI panel can move to `~> 2.1`.
 
 Later builds go over the network:
 
@@ -76,14 +88,14 @@ opens IEx. The Erlang console is **not** on the display: `ctty: "ttyS0"` moves i
 
 `lib/rpi_framebuffer/surface.ex` is short; the library does the rest.
 
-1. `init/1` opens the framebuffer with `RasterExRatatui.Framebuffer.open/2`, which also reads `virtual_size`, `bits_per_pixel`, and `stride` from `/sys/class/graphics/fb0`.
+1. `init/1` opens the framebuffer with `RasterExRatatui.Framebuffer.open/2`, which also reads `virtual_size`, `bits_per_pixel`, and `stride` from `/sys/class/graphics/fb0`. The display drivers are kernel modules that load during boot, so the device can appear seconds after the application starts: the surface keeps trying for `framebuffer_timeout:` (30 seconds by default) before giving up.
 2. `Framebuffer.format_for/1` picks the pixel format from the depth: `RGB565` at 16 bits per pixel (what the KMS fbdev emulation gives the Touch Display 2), `XRGB8888` at 32.
 3. The font scale defaults to the largest integer that keeps at least 100 columns on the panel's long side: 2 on 720×1280 (12×16 pixel cells), 3 at 1080p (18×24). `scale:` in the config overrides it.
 4. `Framebuffer.unbind_console/2` detaches the kernel's framebuffer console, best effort.
 5. `push/2` hands the patches to `Framebuffer.write/2`: one positioned write per patch row, never past the end of the device.
 6. The keyboard is the first input device that reports letter keys, read through [`input_event`](https://hex.pm/packages/input_event) with `grab: true`. `RasterExRatatui.Input.Evdev` turns its events into `%ExRatatui.Event.Key{}` structs, and the surface returns them as `{:events, keys, state}`. A missing or unplugged keyboard is looked for again every two seconds.
 
-Options go in `config :rpi_framebuffer, RpiFramebuffer.Surface, [...]`: `scale:`, `framebuffer:` (default `"fb0"`), `console:` (default `"vtcon1"`), `keyboard:` (default `true`), and `spin_ms:` (default `200`), the interval between two turns of the 3D object.
+Options go in `config :rpi_framebuffer, RpiFramebuffer.Surface, [...]`: `scale:`, `framebuffer:` (default `"fb0"`), `framebuffer_timeout:` (default `30_000` ms), `console:` (default `"vtcon1"`), `keyboard:` (default `true`), and `spin_ms:` (default `200`), the interval between two turns of the 3D object.
 
 ## Check a new panel
 
@@ -104,6 +116,9 @@ The surface logs the geometry, format, and scale it chose, and the keyboard it f
 
 ## Troubleshooting
 
+- **`mix firmware` stops with "Elixir was compiled by a different version of the Erlang/OTP compiler".** The Elixir in use was built for another OTP major than the target's. A version manager's plain `elixir 1.x` is often an older-OTP build even when a newer Erlang runs it. Install the `-otp-28` build as shown above; hex, rebar, and `nerves_bootstrap` are per Elixir install and need installing again.
+- **The panel stays dark, SSH works, and `RingLogger.next()` shows `{:framebuffer, {:enoent, ...}}`.** No framebuffer appeared within `framebuffer_timeout:`. `File.ls!("/dev")` without an `fb0` and an empty `/sys/class/backlight` mean the kernel never brought the panel up: see "Why 2.0.x" above for the known cause, and check the ribbon and the display's power leads otherwise.
+- **Host tests fail with "Failed to load NIF library ... x86_64".** The other side of the next item: the laptop's NIF was deleted for a firmware build. `MIX_ENV=test mix deps.compile ex_ratatui --force` brings it back.
 - **`mix firmware` stops in `scrub-otp-release` with "Unexpected executable format ... x86_64".** A host build (`mix test`, `iex -S mix`) downloaded the laptop's ex_ratatui NIF into `deps/ex_ratatui/priv/native/`, next to the Pi's. Delete the `x86_64` (or `aarch64-apple-darwin`) `.so` there and build again. It comes back after the next host build.
 - **The 3D object turns slowly.** A pixel region costs time per pixel it covers, and every turn repaints it. Raise `spin_ms:` so it turns less often. The `:telemetry` events `[:raster_ex_ratatui, :frame, :raster]` and `[:raster_ex_ratatui, :frame, :push]` say where the time goes.
 - **A cursor or boot text over the dashboard.** The console unbind failed or the framebuffer console is not `vtcon1`: `cat /sys/class/vtconsole/*/name` tells which one is the "frame buffer device", and `console:` takes its name.
