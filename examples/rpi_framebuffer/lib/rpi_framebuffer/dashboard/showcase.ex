@@ -52,6 +52,7 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
   @shapes [:cube, :orbit, :cylinder]
   @black {0, 0, 0}
   @white {255, 255, 255}
+  @warm {255, 244, 214}
 
   @photos [
     {"jellyfish.jpg", "Marat Gilyadzinov"},
@@ -268,7 +269,11 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
       objects: objects(shape, angle),
       lights: [
         Light.ambient(@white, 0.45),
-        Light.directional({-0.5, -1.0, -0.6}, {255, 244, 214}),
+        # The renderer's cube and sphere meshes disagree on which way their
+        # normals face, so one key light leaves one of them lit from behind.
+        # The same light from both sides brightens the top of either.
+        Light.directional({-0.5, -1.0, -0.6}, @warm),
+        Light.directional({0.5, 1.0, 0.6}, @warm),
         Light.point({2.5, 0.5, 1.0}, {90, 140, 255}, intensity: 1.5)
       ],
       background: @black

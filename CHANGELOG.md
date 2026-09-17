@@ -9,11 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `examples/rpi_framebuffer`: a Nerves project that runs a `RasterExRatatui.Surface` on a Raspberry Pi's `/dev/fb0` with a USB keyboard. The panel's size, pixel format, and font scale are read from sysfs, so the same firmware fits the DSI Touch Display 2 and an HDMI monitor. The app is a three-tab dashboard (pixel regions, system monitor, keyboard test) that also runs in a terminal.
+- `examples/e_ink`: a walk through the e-ink name badge, the consumer that uses the pure core from its own screen process instead of a surface.
 - `RasterExRatatui.Raster.apply/2` takes a list of payloads and rasterises them as one: the grid is folded through all of them first, so a cell or region that changed several times is drawn once, in its final state. The patches are those of the last state only.
 
 ### Changed
 
 - The surface process folds renders instead of queuing them. When a diff arrives, every diff already waiting in the mailbox goes with it through one `Raster.apply/2` and one push, right away; before, each diff was rasterised on its own and the push went through a self-sent message that queued behind every render still waiting, so a panel whose raster took longer than the app's tick fell further behind on every frame (on a Raspberry Pi 4 with a turning `Viewport3D` region: one push every ~5 s, ~28 stacked copies of the same rectangle per push, and key presses ~5 s late). Now the panel shows fewer, later frames and input never waits behind stale renders. `min_interval:` holds the batch back on a timer instead of rasterising in between. The `[:raster_ex_ratatui, :frame, :raster]` `:stop` metadata gains `:diffs`, how many were folded into the call.
+- `examples/README.md` is a catalogue page with a row per example; the device examples carry their own READMEs. The Linux Framebuffers and Building a Surface guides point at them.
 
 ## [0.1.0] - 2026-09-15
 

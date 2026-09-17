@@ -12,7 +12,7 @@ The consumer-facing API guide lives in [usage-rules.md](usage-rules.md) (shipped
   - `RasterExRatatui.Grid` (cell map + region list) and `RasterExRatatui.Raster` (grid → `Patch` list or a full frame)
 - **Surface** — `use RasterExRatatui.Surface`: a supervised process that owns the ExRatatui server on a `{:cell_session, ...}` transport, folds diffs through `Raster`, and calls the consumer's `push/2`. Input is the consumer's: it hands `ExRatatui.Event` structs to the surface, which forwards them to the server
 - **Device helpers** — `RasterExRatatui.Framebuffer` (Linux fbdev geometry + writes, file access injectable) and `RasterExRatatui.Input.Evdev` (pure evdev key → `ExRatatui.Event.Key` translator; the library does not depend on `input_event`)
-- **`examples/`** — a headless snapshot script and a rasterisation benchmark (not part of the library's build or coverage)
+- **`examples/`** — a headless snapshot script, a rasterisation benchmark, `rpi_framebuffer/` (a Nerves project with its own `mix.exs`, deps, and tests: the surface process on `/dev/fb0`), and `e_ink/` (a README walking through the name badge fork, which uses the pure core). None of it is part of the library's build or coverage; `examples/README.md` is the catalogue page and every new example gets a row there
 
 ## Build
 

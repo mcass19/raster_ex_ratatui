@@ -4,7 +4,7 @@ A Linux framebuffer exposes a display as a file: `/dev/fb0` holds the pixels and
 
 > #### Status {: .info}
 >
-> Both helpers are tested against a fake sysfs, a regular file standing in for `/dev/fb0`, and synthetic key events. They have not run on a device yet. The first hardware planned for them is a Raspberry Pi 4 with the official Touch Display 2, and this guide will gain the device-specific notes from that run.
+> Both helpers are tested against a fake sysfs, a regular file standing in for `/dev/fb0`, and synthetic key events. The device checks below have run on a Raspberry Pi 4 with the official Touch Display 2 (`vc4drmfb`, 720×1280, 16 bits per pixel, stride 1440); the helpers' own first run on that device is pending, with the [`rpi_framebuffer`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/rpi_framebuffer) example, and this guide will gain the notes from it.
 
 ## Check the device first
 
@@ -28,11 +28,13 @@ and at 16 (`<<0, 248>>` is red in little-endian RGB565):
 File.write!("/dev/fb0", :binary.copy(<<0, 248>>, info.width * info.height))
 ```
 
-The depth is whatever the kernel chose, so read `bits_per_pixel` instead of assuming it. `RasterExRatatui.Framebuffer.format_for/1` maps 16 to `RGB565` and 32 to `XRGB8888`, and returns `{:error, :unsupported}` for anything else.
+A write longer than the device fails with `:enospc` after painting what fits, which is what painting 32-bit pixels on a 16-bit framebuffer looks like.
+
+The depth is whatever the kernel chose, so read `bits_per_pixel` instead of assuming it. The KMS fbdev emulation on a Raspberry Pi gives the DSI Touch Display 2 16 bits per pixel. `RasterExRatatui.Framebuffer.format_for/1` maps 16 to `RGB565` and 32 to `XRGB8888`, and returns `{:error, :unsupported}` for anything else.
 
 ## The surface
 
-A sketch of a surface for `/dev/fb0` with a keyboard read through [`input_event`](https://hex.pm/packages/input_event) (a dependency of the consumer, not of this library):
+A sketch of a surface for `/dev/fb0` with a keyboard read through [`input_event`](https://hex.pm/packages/input_event) (a dependency of the consumer, not of this library). The [`rpi_framebuffer`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/rpi_framebuffer) example is the complete version: a Nerves project with the scale derived from the panel size, a keyboard that can come and go, and tests against a fake sysfs.
 
 ```elixir
 defmodule MyDevice.FramebufferSurface do
@@ -90,7 +92,7 @@ The kernel's framebuffer console draws on the same device, so boot messages, a l
 
 `input_event` reads `/dev/input/eventN` and delivers `{:input_event, path, events}` to the process that started it; started in the surface's `init/1`, that is the surface. `grab: true` keeps the keystrokes from also reaching the kernel console. `RasterExRatatui.Input.Evdev` keeps track of shift, ctrl, alt, super, and caps lock, and produces the same `%ExRatatui.Event.Key{}` structs a terminal would, so the app's key handling is unchanged. Layouts other than US are a `layout:` map away.
 
-A keyboard plugged in after boot gets a new event device; a small process that polls `InputEvent.enumerate/0` and starts readers covers hot-plugging.
+A keyboard plugged in after boot gets a new event device. The `rpi_framebuffer` example covers it inside the surface: the reader is linked, the surface looks for a keyboard again when the reader exits and every two seconds while there is none, and it starts from a fresh `Evdev` state so modifiers held on the old keyboard do not stick.
 
 ## Performance
 
