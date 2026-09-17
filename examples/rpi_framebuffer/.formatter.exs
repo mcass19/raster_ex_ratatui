@@ -3,6 +3,6 @@
   inputs: [
     "{mix,.formatter}.exs",
     "{config,lib,test}/**/*.{ex,exs}",
-    "examples/{bench,headless}/**/*.exs"
+    "rootfs_overlay/etc/iex.exs"
   ]
 ]
