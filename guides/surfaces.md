@@ -68,7 +68,7 @@ The grid is the panel size divided by the effective cell, which is the font's ce
 
 ## Patches or frames
 
-By default `push/2` receives a list of `RasterExRatatui.Patch` rectangles: one per run of changed cells on a row, one per pixel region when the region list changed, and the whole panel on the first render and after a resize. Writing them in order keeps the panel identical to `RasterExRatatui.Raster.frame/1`. Most displays can write a window (SPI LCD controllers have a "set address window" command; a framebuffer is a file with offsets), and patches keep the per-frame cost proportional to what changed.
+By default `push/2` receives a list of `RasterExRatatui.Patch` rectangles: one per run of changed cells on a row, one per pixel region that is new or changed, and the whole panel on the first render and after a resize. Writing them in order keeps the panel identical to `RasterExRatatui.Raster.frame/1`. Most displays can write a window (SPI LCD controllers have a "set address window" command; a framebuffer is a file with offsets), and patches keep the per-frame cost proportional to what changed.
 
 Some panels only take whole frames: an e-ink controller that refreshes the entire panel, or a driver that expects a PNG. Set `push_mode: :frame` and `push/2` receives `{:frame, binary}` instead.
 

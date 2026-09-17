@@ -217,7 +217,7 @@ defmodule RasterExRatatui.RasterTest do
       assert Enum.all?(patches, &(&1.data == :binary.copy(@paper, byte_size(&1.data))))
     end
 
-    test "a changed region list repaints every region" do
+    test "only the region that changed is repainted" do
       a = region(0, 0, 1, 1, {0, 0, 0})
       b = region(2, 0, 1, 1, {0, 0, 0})
       {raster, _} = Raster.apply(mono(), full_diff({4, 2}, [], [a, b]))
@@ -225,10 +225,71 @@ defmodule RasterExRatatui.RasterTest do
       b2 = region(2, 0, 1, 1, {255, 255, 255})
       {_raster, patches} = Raster.apply(raster, %Diff{width: 4, height: 2, regions: [a, b2]})
 
-      assert Enum.map(patches, &{&1.x, &1.data}) == [
-               {0, :binary.copy(@ink, 48)},
-               {12, :binary.copy(@paper, 48)}
+      assert Enum.map(patches, &{&1.x, &1.data}) == [{12, :binary.copy(@paper, 48)}]
+    end
+
+    test "a region that moves repaints the cells it left and itself, not its neighbour" do
+      still = region(0, 0, 1, 1, {0, 0, 0})
+
+      {raster, _} =
+        Raster.apply(mono(), full_diff({4, 2}, [], [still, region(2, 0, 1, 1, {0, 0, 0})]))
+
+      moved = region(3, 1, 1, 1, {0, 0, 0})
+
+      {_raster, patches} =
+        Raster.apply(raster, %Diff{width: 4, height: 2, regions: [still, moved]})
+
+      assert Enum.map(patches, &{&1.x, &1.y, &1.data}) == [
+               {12, 0, :binary.copy(@paper, 48)},
+               {18, 8, :binary.copy(@ink, 48)}
              ]
+    end
+
+    test "an unchanged region under a changed one is repainted first, so the order holds" do
+      below = region(0, 0, 2, 1, {0, 0, 0})
+      above = region(1, 0, 2, 1, {0, 0, 0})
+      aside = region(3, 1, 1, 1, {0, 0, 0})
+      {raster, _} = Raster.apply(mono(), full_diff({4, 2}, [], [below, above, aside]))
+
+      above2 = region(1, 0, 2, 1, {255, 255, 255})
+      diff = %Diff{width: 4, height: 2, regions: [below, above2, aside]}
+      {raster, patches} = Raster.apply(raster, diff)
+
+      assert Enum.map(patches, &{&1.x, &1.width}) == [{0, 12}, {6, 12}]
+      assert pixel(Raster.frame(raster), raster, 3, 0) == @ink
+      assert pixel(Raster.frame(raster), raster, 8, 0) == @paper
+    end
+
+    test "a region that goes away uncovers the unchanged region it overlapped" do
+      below = region(0, 0, 2, 1, {0, 0, 0})
+      above = region(1, 0, 2, 1, {255, 255, 255})
+      {raster, frame} = render(mono(), [], [below, above])
+      assert pixel(frame, raster, 8, 0) == @paper
+
+      {raster, patches} = Raster.apply(raster, %Diff{width: 4, height: 2, regions: [below]})
+
+      assert Enum.map(patches, &{&1.x, &1.width}) == [{12, 6}, {0, 12}]
+      assert blit(frame, raster, patches) == Raster.frame(raster)
+      assert pixel(Raster.frame(raster), raster, 8, 0) == @ink
+    end
+
+    test "unchanged regions that swap places are all repainted" do
+      a = region(0, 0, 2, 1, {0, 0, 0})
+      b = region(1, 0, 2, 1, {255, 255, 255})
+      {raster, frame} = render(mono(), [], [a, b])
+
+      {raster, patches} = Raster.apply(raster, %Diff{width: 4, height: 2, regions: [b, a]})
+
+      assert Enum.map(patches, & &1.x) == [6, 0]
+      assert blit(frame, raster, patches) == Raster.frame(raster)
+      assert pixel(Raster.frame(raster), raster, 8, 0) == @ink
+    end
+
+    test "the same region list again costs nothing" do
+      regions = [region(0, 0, 1, 1, {0, 0, 0}), region(2, 0, 1, 1, {9, 9, 9})]
+      {raster, _} = Raster.apply(mono(), full_diff({4, 2}, [], regions))
+
+      assert {_raster, []} = Raster.apply(raster, %Diff{width: 4, height: 2, regions: regions})
     end
 
     test "a list of diffs is rasterised once, in its final state" do
@@ -371,6 +432,24 @@ defmodule RasterExRatatui.RasterTest do
 
       assert [%Patch{x: 6, y: 8, width: 108, height: 64}] = patches
     end
+
+    test "a still region beside an animated one is rasterised once" do
+      raster = Raster.new(size: {240, 160}, format: RGB565)
+      session = session(raster)
+      still = %Rect{x: 0, y: 0, width: 20, height: 10}
+      turning = %Rect{x: 20, y: 0, width: 20, height: 10}
+
+      {raster, first} =
+        Raster.apply(raster, draw(session, [cube(still, 0.2), cube(turning, 0.2)]))
+
+      {_raster, next} =
+        Raster.apply(raster, draw(session, [cube(still, 0.2), cube(turning, 0.9)]))
+
+      :ok = CellSession.close(session)
+
+      assert Enum.count(first, &(&1.height == 64)) == 2
+      assert [%Patch{x: 126, y: 8, width: 108, height: 64}] = next
+    end
   end
 
   describe "patches against frames" do
@@ -378,8 +457,8 @@ defmodule RasterExRatatui.RasterTest do
       check all(
               format <- member_of([Mono, RGB565]),
               scale <- integer(1..2),
-              steps <- list_of(diff_step(), min_length: 1, max_length: 6),
-              max_runs: 60
+              steps <- list_of(diff_step(), min_length: 1, max_length: 8),
+              max_runs: 150
             ) do
         raster =
           Raster.new(size: {5 * 6 * scale + 1, 3 * 8 * scale + 2}, format: format, scale: scale)
@@ -426,7 +505,7 @@ defmodule RasterExRatatui.RasterTest do
         }
       end
 
-    region =
+    random_region =
       gen all(
             x <- integer(0..5),
             y <- integer(0..3),
@@ -439,8 +518,19 @@ defmodule RasterExRatatui.RasterTest do
         region(x, y, w, h, {shade, 255 - shade, shade}, {pw, ph})
       end
 
+    # Regions mostly come from a small pool that overlaps itself, so the same
+    # region shows up in consecutive payloads (kept, reordered, uncovered).
+    pool = [
+      region(0, 0, 2, 2, {0, 0, 0}, {2, 2}),
+      region(1, 1, 2, 2, {255, 255, 255}, {1, 1}),
+      region(1, 0, 3, 1, {120, 130, 140}, {3, 1}),
+      region(3, 1, 2, 2, {250, 10, 10}, {2, 3}),
+      region(4, 0, 1, 1, {10, 250, 10}, {1, 1})
+    ]
+
+    region = frequency([{4, member_of(pool)}, {1, random_region}])
     cells = list_of(cell, max_length: 8)
-    regions = list_of(region, max_length: 2)
+    regions = list_of(region, max_length: 3)
 
     # Mostly incremental diffs, sometimes a full payload, sometimes a full
     # payload at another size (as after a resize).

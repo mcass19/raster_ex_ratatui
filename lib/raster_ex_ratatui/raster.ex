@@ -20,7 +20,7 @@ defmodule RasterExRatatui.Raster do
   `apply/2` rasterises only what changed:
 
     * changed cells, one patch per contiguous run on a row
-    * when the region list changed, one patch per region (its bitmap scaled nearest-neighbour onto its cell rect, clipped to the grid), plus the cells an old region no longer covers
+    * when the region list changed, one patch per region that is new or whose bitmap or rect changed (the bitmap scaled nearest-neighbour onto its cell rect, clipped to the grid), plus the cells a region that went away no longer covers. A region that is the same as in the previous payload costs nothing, so a still image next to an animated one is rasterised once. Overlapping regions stay correct: an unchanged region that touches a repainted area is repainted too, in list order
     * on a full payload (the first diff, a snapshot, a resize), every run of cells on every row, every region, and the margins
 
   Cells under a pixel region are never rasterised, on full payloads or diffs: they arrive blank and the region paints over them.
@@ -268,13 +268,13 @@ defmodule RasterExRatatui.Raster do
         full_patches(raster, regions)
 
       changed ->
-        cells =
-          if regions_changed?, do: changed ++ region_cells(raster, old_regions), else: changed
+        {stale, repaint} =
+          if regions_changed?, do: changed_regions(old_regions, regions), else: {[], []}
 
+        cells = changed ++ region_cells(raster, stale)
         runs = cells |> Enum.filter(&paintable?(&1, raster, regions)) |> runs()
         {cell_patches, raster} = Enum.map_reduce(runs, raster, &run_patch(&2, &1))
-        region_patches = if regions_changed?, do: region_patches(raster, regions), else: []
-        {raster, cell_patches ++ region_patches}
+        {raster, cell_patches ++ region_patches(raster, repaint)}
     end
   end
 
@@ -382,6 +382,40 @@ defmodule RasterExRatatui.Raster do
 
   defp paintable?({col, row}, %__MODULE__{grid_size: {cols, rows}}, regions) do
     col < cols and row < rows and not Enum.any?(regions, &covers?(&1, col, row))
+  end
+
+  # What a new region list costs: `stale` are the old regions that are gone
+  # (or changed), whose cells need repainting, and `repaint` the new regions
+  # to rasterise, in list order.
+  #
+  # A region equal to one in the old list is skipped, unless it touches an
+  # area that is repainted anyway: regions are painted in list order, so where
+  # two overlap, repainting one means repainting the ones around it. When the
+  # kept regions changed order among themselves, everything is repainted.
+  defp changed_regions(old, new) do
+    kept = Enum.filter(new, &(&1 in old))
+
+    if kept == Enum.filter(old, &(&1 in new)) do
+      stale = old -- kept
+      fresh = new -- kept
+      {stale, Enum.filter(new, &(&1 in spread(kept, fresh, stale ++ fresh)))}
+    else
+      {old, new}
+    end
+  end
+
+  # Grows `repaint` with every kept region that overlaps a dirty rect, until
+  # no kept region does.
+  defp spread(kept, repaint, dirty) do
+    case Enum.split_with(kept, fn region -> Enum.any?(dirty, &overlap?(&1, region)) end) do
+      {[], _clear} -> repaint
+      {touched, clear} -> spread(clear, repaint ++ touched, dirty ++ touched)
+    end
+  end
+
+  defp overlap?(%Region{} = a, %Region{} = b) do
+    a.x < b.x + b.width and b.x < a.x + a.width and a.y < b.y + b.height and
+      b.y < a.y + a.height
   end
 
   defp covers?(%Region{x: x, y: y, width: w, height: h}, col, row) do

@@ -89,7 +89,9 @@ for {w, h} <- [{20, 10}, {53, 22}] do
   end)
 end
 
-# A still image beside an animation.
+# A still image beside an animation: the big region stays the same from one
+# payload to the next and only the small one changes, so only the small one
+# is rasterised.
 gradient = fn pw, ph, blue ->
   for y <- 0..(ph - 1), x <- 0..(pw - 1), into: <<>>, do: <<rem(x, 256), rem(y, 256), blue>>
 end
@@ -118,6 +120,10 @@ end
 
 [before, after_turn] = [turning.(0), turning.(255)]
 {both, _} = Raster.apply(warm, %Diff{width: cols, height: rows, regions: [still, before]})
+
+RasterBench.measure("apply/2, 20x10 region beside a still 53x22", 10, fn ->
+  Raster.apply(both, %Diff{width: cols, height: rows, regions: [still, after_turn]})
+end)
 
 # Ten renders folded into one call, as the surface does when it has fallen
 # behind: the region is rasterised once, in its final state.

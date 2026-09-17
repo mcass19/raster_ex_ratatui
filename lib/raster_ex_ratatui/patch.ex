@@ -2,7 +2,7 @@ defmodule RasterExRatatui.Patch do
   @moduledoc """
   A rectangle of packed pixels to write to a panel.
 
-  `RasterExRatatui.Raster.apply/2` answers a cell diff with a list of patches: one per run of changed cells on a row, one per pixel region when the region list changed, and the margins on a full repaint. A panel driver writes each patch at `(x, y)`, **in list order** (a region patch may overlap cells painted by an earlier patch).
+  `RasterExRatatui.Raster.apply/2` answers a cell diff with a list of patches: one per run of changed cells on a row, one per pixel region that is new or changed, and the margins on a full repaint. A panel driver writes each patch at `(x, y)`, **in list order** (a region patch may overlap cells painted by an earlier patch).
 
   ## Fields
 
