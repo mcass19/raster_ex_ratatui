@@ -4,7 +4,7 @@ A Linux framebuffer exposes a display as a file: `/dev/fb0` holds the pixels and
 
 > #### Status {: .info}
 >
-> Both helpers are tested against a fake sysfs, a regular file standing in for `/dev/fb0`, and synthetic key events. The device checks below have run on a Raspberry Pi 4 with the official Touch Display 2 (`vc4drmfb`, 720×1280, 16 bits per pixel, stride 1440); the helpers' own first run on that device is pending, with the [`rpi_framebuffer`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/rpi_framebuffer) example, and this guide will gain the notes from it.
+> Both helpers are tested against a fake sysfs, a regular file standing in for `/dev/fb0`, and synthetic key events, and run on hardware in the [`rpi_framebuffer`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/rpi_framebuffer) example: a Raspberry Pi 4 with the official Touch Display 2 (`vc4drmfb`, 720×1280, 16 bits per pixel, stride 1440) on a Nerves 2.0.x system. The device notes below come from that run.
 
 ## Check the device first
 
@@ -62,11 +62,20 @@ defmodule MyDevice.FramebufferSurface do
 
   @impl true
   def handle_info({:input_event, _path, events}, state) do
+    # `events` is `:disconnect` when the keyboard goes away; Evdev drops the
+    # held modifiers, and a real surface then looks for a keyboard again.
     {keyboard, keys} = Evdev.translate_all(state.keyboard, events)
     {:events, keys, %{state | keyboard: keyboard}}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  # The reader is only linked, and a surface that stops normally (its app quit)
+  # does not take a linked process with it: stop it, or its grab on the device
+  # outlives the surface and the next one gets `:disconnect` at once.
+  @impl true
+  def terminate(_reason, %{reader: reader}) when is_pid(reader), do: GenServer.stop(reader)
+  def terminate(_reason, _state), do: :ok
 
   defp keyboard_path do
     {path, _info} =
@@ -81,6 +90,8 @@ end
 
 `Framebuffer.write/2` places every patch row at `y * stride + x * bytes_per_pixel`, so line padding (a stride longer than the visible line) is handled; a full frame is written the same way.
 
+The display drivers are kernel modules that load while the system boots, so `/dev/fb0` can appear seconds after the application starts (on the Pi 4 the DSI panel probed about ten seconds after the app). A surface that fails on its first look takes the application down with it; the example keeps trying `Framebuffer.open/2` for thirty seconds instead.
+
 ## Keep the console off the display
 
 The kernel's framebuffer console draws on the same device, so boot messages, a login prompt, or a blinking cursor can appear on top of the app.
@@ -92,11 +103,11 @@ The kernel's framebuffer console draws on the same device, so boot messages, a l
 
 `input_event` reads `/dev/input/eventN` and delivers `{:input_event, path, events}` to the process that started it; started in the surface's `init/1`, that is the surface. `grab: true` keeps the keystrokes from also reaching the kernel console. `RasterExRatatui.Input.Evdev` keeps track of shift, ctrl, alt, super, and caps lock, and produces the same `%ExRatatui.Event.Key{}` structs a terminal would, so the app's key handling is unchanged. Layouts other than US are a `layout:` map away.
 
-A keyboard plugged in after boot gets a new event device. The `rpi_framebuffer` example covers it inside the surface: the reader is linked, the surface looks for a keyboard again when the reader exits and every two seconds while there is none, and it starts from a fresh `Evdev` state so modifiers held on the old keyboard do not stick.
+A keyboard plugged in after boot gets a new event device. The `rpi_framebuffer` example covers it inside the surface: the reader is linked, the surface looks for a keyboard again when the reader exits and every two seconds while there is none, and it starts from a fresh `Evdev` state so modifiers held on the old keyboard do not stick. Two things to know about `input_event` there: `InputEvent.enumerate/0` starts and stops a short-lived reader per device from the calling process, so a surface, which traps exits, sees their `:normal` exits in `handle_info/2` and must ignore them; and a reader that is only linked outlives a surface that stops normally, keeping its grab, so the surface stops it in `terminate/2` as the sketch above does.
 
 ## Performance
 
-The surface pushes patches, so the steady-state cost follows what changed rather than the size of the panel. Pixel regions are the exception, since their cost grows with the panel pixels they cover (see [Pixel Formats](pixel_formats.md#writing-a-format)): an animated `Viewport3D` is cheaper in a moderate rect or rendered less often. Only regions that changed are rasterised, so a still `Image` beside the animation costs nothing after its first frame.
+The surface pushes patches, so the steady-state cost follows what changed rather than the size of the panel. Pixel regions are the exception, since their cost grows with the panel pixels they cover (see [Pixel Formats](pixel_formats.md#writing-a-format)): an animated `Viewport3D` is cheaper in a moderate rect or rendered less often. Only regions that changed are rasterised, so a still `Image` beside the animation costs nothing after its first frame. On the Pi 4, a 696×480 `Viewport3D` region turning five times a second costs about 43 ms to rasterise and 13 ms to write at RGB565, and the surface's mailbox stays empty; `RasterExRatatui.Telemetry.probe/3` prints those numbers for any surface.
 
 ## Panels without a framebuffer
 
