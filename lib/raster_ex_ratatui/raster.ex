@@ -475,10 +475,9 @@ defmodule RasterExRatatui.Raster do
     regions |> Enum.map(&region_patch(raster, &1)) |> Enum.reject(&is_nil/1)
   end
 
-  defp region_patch(%__MODULE__{} = raster, %Region{pixel_width: pw, pixel_height: ph} = region) do
+  defp region_patch(%__MODULE__{} = raster, %Region{} = region) do
     {cell_w, cell_h} = raster.cell_size
     {cols, rows} = raster.grid_size
-    %{format: format, config: config} = raster
 
     x0 = region.x * cell_w
     y0 = region.y * cell_h
@@ -486,24 +485,47 @@ defmodule RasterExRatatui.Raster do
     rect_h = min(region.height * cell_h, rows * cell_h - y0)
 
     if rect_w > 0 and rect_h > 0 do
-      columns = for dx <- 0..(rect_w - 1), do: {x0 + dx, div(dx * pw, region.width * cell_w) * 3}
-
-      data =
-        for dy <- 0..(rect_h - 1), into: <<>> do
-          sy = div(dy * ph, region.height * cell_h)
-          source = binary_part(region.data, sy * pw * 3, pw * 3)
-          region_row(source, columns, y0 + dy, format, config)
-        end
-
-      %Patch{x: x0, y: y0, width: rect_w, height: rect_h, data: data}
+      rows = region_rows(raster, region, {x0, y0}, {rect_w, rect_h})
+      %Patch{x: x0, y: y0, width: rect_w, height: rect_h, data: IO.iodata_to_binary(rows)}
     end
   end
 
-  defp region_row(source, columns, y, format, config) do
-    for {x, offset} <- columns, into: <<>> do
-      <<r, g, b>> = binary_part(source, offset, 3)
-      format.rgb_pixel(r, g, b, x, y, config)
-    end
+  # One packed row per panel row of the rect, through the format's row path.
+  defp region_rows(
+         %__MODULE__{} = raster,
+         %Region{pixel_width: pw, pixel_height: ph} = region,
+         {x0, y0},
+         {rect_w, rect_h}
+       ) do
+    {cell_w, cell_h} = raster.cell_size
+    %{format: format, config: config} = raster
+    full_w = region.width * cell_w
+    full_h = region.height * cell_h
+
+    # Nearest-neighbour column offsets into a source row, or nil when the
+    # bitmap's rows already are the rect's rows (the usual case: a session
+    # created with the raster's font_size renders regions at panel size).
+    gather =
+      if pw == full_w and rect_w == full_w,
+        do: nil,
+        else: for(dx <- 0..(rect_w - 1), do: div(dx * pw, full_w) * 3)
+
+    {rows, _last} =
+      Enum.map_reduce(0..(rect_h - 1), {-1, nil}, fn dy, {last_sy, last_row} ->
+        sy = div(dy * ph, full_h)
+        # An upscaled region repeats source rows; gather each one once.
+        row = if sy == last_sy, do: last_row, else: source_row(region.data, sy, pw, gather)
+        {PixelFormat.rgb_row(format, row, x0, y0 + dy, config), {sy, row}}
+      end)
+
+    rows
+  end
+
+  defp source_row(data, sy, pw, nil), do: binary_part(data, sy * pw * 3, pw * 3)
+
+  defp source_row(data, sy, pw, gather) do
+    source = binary_part(data, sy * pw * 3, pw * 3)
+    for offset <- gather, into: <<>>, do: binary_part(source, offset, 3)
   end
 
   # -- cells -----------------------------------------------------------------

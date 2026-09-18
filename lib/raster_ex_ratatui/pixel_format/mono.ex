@@ -123,6 +123,31 @@ defmodule RasterExRatatui.PixelFormat.Mono do
 
   @impl true
   @doc """
+  Dithers a row of RGB pixels against the Bayer row for `y`, walking the tile from `x`.
+
+  ## Examples
+
+      iex> alias RasterExRatatui.PixelFormat.Mono
+      iex> Mono.rgb_row(:binary.copy(<<128, 128, 128>>, 4), 0, 1, %{})
+      <<0, 255, 0, 255>>
+      iex> Mono.rgb_row(:binary.copy(<<128, 128, 128>>, 4), 1, 1, %{})
+      <<255, 0, 255, 0>>
+  """
+  @spec rgb_row(binary(), non_neg_integer(), non_neg_integer(), term()) :: binary()
+  def rgb_row(row, x, y, _config) do
+    thresholds = @bayer |> elem(rem(y, 4)) |> Tuple.to_list() |> Enum.map(&(&1 * 16 + 8))
+    dither(row, rem(x, 4), List.to_tuple(thresholds), [])
+  end
+
+  defp dither(<<r, g, b, rest::binary>>, i, thresholds, acc) do
+    tone = if luma(r, g, b) < elem(thresholds, i), do: @ink, else: @paper
+    dither(rest, rem(i + 1, 4), thresholds, [tone | acc])
+  end
+
+  defp dither(<<>>, _i, _thresholds, acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
+
+  @impl true
+  @doc """
   Paper.
 
   ## Examples

@@ -18,6 +18,8 @@ defmodule RasterExRatatui.PixelFormat do
 
   `c:rgb_pixel/6` packs one region pixel. The position is there for ordered dithering; formats that do not dither ignore it.
 
+  `c:rgb_row/4` is optional and packs a whole row of region pixels in one call. The raster prefers it when a format exports it, because regions are the expensive path: one function call per pixel is most of their cost. A format that does not define it gets `rgb_row/5`, the per-pixel fallback, which is exactly what the three built-in formats do in one binary comprehension instead.
+
   ## Examples
 
       iex> alias RasterExRatatui.PixelFormat.XRGB8888
@@ -58,8 +60,42 @@ defmodule RasterExRatatui.PixelFormat do
               config()
             ) :: binary()
 
+  @doc """
+  Packs a row of region pixels: `row` holds `n` RGB8 pixels (`3 * n` bytes) that land at panel positions `(x, y)` to `(x + n - 1, y)`. Returns `n` packed pixels.
+
+  Optional. Must produce the same bytes as `n` calls to `c:rgb_pixel/6`.
+  """
+  @callback rgb_row(row :: binary(), x :: non_neg_integer(), y :: non_neg_integer(), config()) ::
+              binary()
+
   @doc "The packed pixel for areas no cell or region covers (margins, skipped cells)."
   @callback blank(config()) :: binary()
+
+  @optional_callbacks rgb_row: 4
+
+  @doc """
+  Packs a row of region pixels with `format`, through its `c:rgb_row/4` when it has one and pixel by pixel through `c:rgb_pixel/6` otherwise.
+
+  ## Examples
+
+      iex> alias RasterExRatatui.PixelFormat
+      iex> PixelFormat.rgb_row(PixelFormat.RGB565, <<255, 0, 0, 0, 0, 255>>, 0, 0, PixelFormat.RGB565.init([]))
+      <<0, 248, 31, 0>>
+  """
+  @spec rgb_row(t(), binary(), non_neg_integer(), non_neg_integer(), config()) :: binary()
+  def rgb_row(format, row, x, y, config) do
+    if function_exported?(format, :rgb_row, 4) do
+      format.rgb_row(row, x, y, config)
+    else
+      pixels(format, row, x, y, config, [])
+    end
+  end
+
+  defp pixels(format, <<r, g, b, rest::binary>>, x, y, config, acc),
+    do: pixels(format, rest, x + 1, y, config, [format.rgb_pixel(r, g, b, x, y, config) | acc])
+
+  defp pixels(_format, <<>>, _x, _y, _config, acc),
+    do: acc |> Enum.reverse() |> IO.iodata_to_binary()
 
   @doc """
   Resolves a paint to the pixel bytes at panel position `(x, y)`.

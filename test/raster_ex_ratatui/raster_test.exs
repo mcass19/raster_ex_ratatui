@@ -353,6 +353,38 @@ defmodule RasterExRatatui.RasterTest do
       assert Enum.all?(pixels(frame, raster, 6..11, 4..7), &(&1 == @ink))
     end
 
+    test "a region is rasterised the same through rows and through pixels, scaled or not" do
+      raster = Raster.new(size: {24, 16}, format: RasterExRatatui.Test.Gray)
+      data = for i <- 1..(6 * 4), into: <<>>, do: <<i, i, i>>
+      native = %{region(0, 0, 1, 1, {0, 0, 0}) | pixel_width: 6, pixel_height: 4, data: data}
+
+      scaled = %{
+        native
+        | x: 1,
+          y: 1,
+          width: 2,
+          pixel_width: 3,
+          pixel_height: 2,
+          data: binary_part(data, 0, 18)
+      }
+
+      {raster, _} = Raster.apply(raster, full_diff({4, 2}, []))
+
+      {_raster, [a, b]} =
+        Raster.apply(raster, %Diff{width: 4, height: 2, regions: [native, scaled]})
+
+      assert {a.width, a.height, byte_size(a.data)} == {6, 8, 48}
+      assert {b.width, b.height} == {12, 8}
+      # Row 0 of the native region is its first six pixels, offset by their column.
+      assert binary_part(a.data, 0, 6) == <<1, 3, 5, 7, 9, 11>>
+      # The scaled region (3×2 source pixels onto 12×8) repeats every source
+      # pixel four times across and every source row four times down; the
+      # column offset (from x = 6) still counts per output pixel.
+      assert binary_part(b.data, 0, 12) == <<7, 8, 9, 10, 12, 13, 14, 15, 17, 18, 19, 20>>
+      assert binary_part(b.data, 12 * 3, 12) == binary_part(b.data, 0, 12)
+      assert binary_part(b.data, 12 * 4, 12) == <<10, 11, 12, 13, 15, 16, 17, 18, 20, 21, 22, 23>>
+    end
+
     test "a region hanging past the grid is clipped, and one wholly outside is dropped" do
       hanging = region(3, 1, 4, 4, {0, 0, 0})
       outside = region(4, 0, 1, 1, {0, 0, 0})

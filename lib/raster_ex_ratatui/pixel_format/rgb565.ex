@@ -79,6 +79,20 @@ defmodule RasterExRatatui.PixelFormat.RGB565 do
 
   @impl true
   @doc """
+  Packs a row of RGB pixels in one pass; the position is ignored.
+
+  ## Examples
+
+      iex> RasterExRatatui.PixelFormat.RGB565.rgb_row(<<255, 0, 0, 0, 0, 255>>, 0, 0, RasterExRatatui.Palette.new())
+      <<0, 248, 31, 0>>
+  """
+  @spec rgb_row(binary(), non_neg_integer(), non_neg_integer(), Palette.t()) :: binary()
+  def rgb_row(row, _x, _y, _palette) do
+    for <<r, g, b <- row>>, into: <<>>, do: pack(r, g, b)
+  end
+
+  @impl true
+  @doc """
   The palette's default background.
 
   ## Examples

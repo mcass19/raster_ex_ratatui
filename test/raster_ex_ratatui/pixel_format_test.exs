@@ -131,6 +131,35 @@ defmodule RasterExRatatui.PixelFormatTest do
     end
   end
 
+  describe "rgb_row" do
+    test "the fallback packs pixel by pixel with the right positions" do
+      row = <<30, 30, 30, 60, 60, 60, 90, 90, 90>>
+      assert PixelFormat.rgb_row(RasterExRatatui.Test.Gray, row, 5, 0, %{}) == <<35, 66, 97>>
+      assert PixelFormat.rgb_row(RasterExRatatui.Test.Gray, <<>>, 5, 0, %{}) == <<>>
+    end
+
+    property "every built-in format's row equals its pixels" do
+      check all(
+              pixels <-
+                list_of({integer(0..255), integer(0..255), integer(0..255)}, max_length: 12),
+              x <- integer(0..7),
+              y <- integer(0..7)
+            ) do
+        row = for {r, g, b} <- pixels, into: <<>>, do: <<r, g, b>>
+
+        for {format, config} <- [{Mono, %{}}, {RGB565, Palette.new()}, {XRGB8888, Palette.new()}] do
+          expected =
+            pixels
+            |> Enum.with_index(x)
+            |> Enum.map_join(fn {{r, g, b}, px} -> format.rgb_pixel(r, g, b, px, y, config) end)
+
+          assert format.rgb_row(row, x, y, config) == expected
+          assert PixelFormat.rgb_row(format, row, x, y, config) == expected
+        end
+      end
+    end
+  end
+
   describe "RGB formats" do
     property "pack every colour to their width and round-trip within their precision" do
       check all(r <- integer(0..255), g <- integer(0..255), b <- integer(0..255)) do
