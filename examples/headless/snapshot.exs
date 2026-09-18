@@ -10,8 +10,6 @@
 #
 #   mix run examples/headless/snapshot.exs
 #   mix run examples/headless/snapshot.exs /tmp/snapshot
-#
-# No terminal, no device: safe to run anywhere.
 
 alias ExRatatui.CellSession
 alias ExRatatui.Layout.Rect

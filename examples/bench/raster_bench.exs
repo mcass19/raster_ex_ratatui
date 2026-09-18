@@ -2,8 +2,6 @@
 # (Default6x8 at scale 3) packed as XRGB8888.
 #
 #   mix run examples/bench/raster_bench.exs
-#
-# Pure computation, no terminal or device involved.
 
 alias ExRatatui.CellSession.{Cell, Diff, Region}
 alias RasterExRatatui.PixelFormat.XRGB8888

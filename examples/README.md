@@ -1,18 +1,6 @@
 # Examples
 
-A catalog of `raster_ex_ratatui` examples, grouped by folder. The scripts run from a checkout of this repository and never touch a terminal; the device examples are Nerves projects.
-
-## Start here
-
-1. [`headless/snapshot.exs`](https://github.com/mcass19/raster_ex_ratatui/blob/main/examples/headless/snapshot.exs) — the whole pipeline in one file, no device needed.
-2. [`rpi_framebuffer/`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/rpi_framebuffer) — a `RasterExRatatui.Surface` on a Linux framebuffer: the usual way onto a panel.
-3. [`e_ink/`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/e_ink) — the pure core inside a device's own process, for panels that already have one in charge.
-
-[Building a Surface](../guides/surfaces.md) explains the contract both device examples follow.
-
 ## Headless
-
-Scripts that rasterise without a device, a surface process, or a terminal.
 
 | Example | Run | What to see |
 |---------|-----|-------------|
@@ -25,8 +13,6 @@ Scripts that rasterise without a device, a surface process, or a terminal.
 | [`raster_bench.exs`](https://github.com/mcass19/raster_ex_ratatui/blob/main/examples/bench/raster_bench.exs) | `mix run examples/bench/raster_bench.exs` | Rasterisation cost on a 1080p panel (a 106×45 grid at scale 3, `XRGB8888`): a full repaint cold and warm, a full frame, a handful of changed cells, one row, and pixel regions of two sizes, as median times. |
 
 ## Devices
-
-Nerves projects. Each folder has its own README with the hardware, the build steps, and a walk through the code.
 
 | Example | Panel | What to see |
 |---------|-------|-------------|
