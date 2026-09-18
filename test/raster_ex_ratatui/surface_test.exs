@@ -71,10 +71,17 @@ defmodule RasterExRatatui.SurfaceTest do
       assert {:error, :no_mount} = TestSurface.start_link(test_pid: self(), app: FailingApp)
     end
 
-    test "invalid push_mode, min_interval, and shutdown_timeout are rejected" do
+    test "invalid push_mode, min_interval, shutdown_timeout, and on_app_exit are rejected" do
       Process.flag(:trap_exit, true)
 
-      for {key, value} <- [push_mode: :bytes, min_interval: :soon, shutdown_timeout: -1] do
+      invalid = [
+        push_mode: :bytes,
+        min_interval: :soon,
+        shutdown_timeout: -1,
+        on_app_exit: :retry
+      ]
+
+      for {key, value} <- invalid do
         capture_log(fn ->
           assert {:error, {%ArgumentError{message: message}, _}} =
                    TestSurface.start_link([{key, value}, test_pid: self()])
@@ -82,6 +89,18 @@ defmodule RasterExRatatui.SurfaceTest do
           assert message =~ inspect(key)
         end)
       end
+    end
+
+    test "an init/1 that returns something else is an ArgumentError naming it" do
+      Process.flag(:trap_exit, true)
+
+      capture_log(fn ->
+        assert {:error, {%ArgumentError{message: message}, _}} =
+                 TestSurface.start_link(test_pid: self(), init_return: {:ok, :state})
+
+        assert message =~ "RasterExRatatui.Test.Surface.init/1"
+        assert message =~ "{:ok, :state}"
+      end)
     end
 
     test "app_opts reach the app and name registers the surface" do
@@ -92,6 +111,24 @@ defmodule RasterExRatatui.SurfaceTest do
       blank = :binary.copy(<<255>>, 30 * 8)
       refute binary_part(frame, 0, 30 * 8) == blank
       assert is_pid(Surface.server(name))
+    end
+
+    test "the app sees the panel as surface: in its options" do
+      start_surface(scale: 2, app_opts: [notify: self()])
+
+      assert_receive {:mounted, opts}
+
+      assert opts[:surface] == %{
+               size: {240, 160},
+               cell_size: {12, 16},
+               grid_size: {20, 10},
+               format: RasterExRatatui.PixelFormat.Mono,
+               scale: 2,
+               rotate: 0
+             }
+
+      assert opts[:width] == 20
+      assert opts[:transport] == :cell_session
     end
 
     test "use defaults: child_spec, init/1 returning the options, handle_info/2, terminate/2" do
@@ -241,11 +278,73 @@ defmodule RasterExRatatui.SurfaceTest do
 
     test "an app that stops stops the surface normally" do
       Process.flag(:trap_exit, true)
+      attach([[:raster_ex_ratatui, :app, :exit]])
       surface = start_surface()
 
       Surface.send_event(surface, key("q"))
       assert_receive {:EXIT, ^surface, :normal}
       assert_receive {:terminated, :normal}
+
+      assert_receive {:telemetry, [_, :app, :exit],
+                      %{pid: ^surface, reason: :normal, action: :stop}}
+    end
+
+    test "on_app_exit: :restart starts the app again when it stops, on the same surface" do
+      attach([[:raster_ex_ratatui, :app, :exit]])
+      surface = start_surface(on_app_exit: :restart, app_opts: [notify: self()])
+      assert_receive {:mounted, _opts}
+      first = Surface.server(surface)
+
+      log =
+        capture_log(fn ->
+          Surface.send_event(surface, key("q"))
+          assert_receive {:mounted, opts}
+          assert opts[:surface].grid_size == {40, 20}
+        end)
+
+      assert_receive {:pushed, patches}
+      assert pushed_area(patches) == 240 * 160
+
+      assert_receive {:telemetry, [_, :app, :exit],
+                      %{pid: ^surface, reason: :normal, action: :restart}}
+
+      assert log =~ "starting it again"
+      assert Process.alive?(surface)
+      assert Surface.server(surface) != first
+      refute Process.alive?(first)
+    end
+
+    test "on_app_exit: :restart starts the app again when it crashes" do
+      Process.flag(:trap_exit, true)
+      surface = start_surface(on_app_exit: :restart, app_opts: [notify: self()])
+      assert_receive {:mounted, _opts}
+      first = Surface.server(surface)
+
+      capture_log(fn ->
+        Surface.send_event(surface, key("!"))
+        assert_receive {:mounted, _opts}
+      end)
+
+      assert_receive {:pushed, patches}
+      assert pushed_area(patches) == 240 * 160
+      refute_received {:EXIT, ^surface, _reason}
+      assert Surface.server(surface) != first
+
+      Surface.send_event(surface, key("a"))
+      assert_receive {:pushed, [%Patch{x: 12, y: 0, width: 6, height: 8}]}
+    end
+
+    test "a restarted app that fails to mount stops the surface" do
+      Process.flag(:trap_exit, true)
+      counter = start_supervised!({Agent, fn -> 0 end})
+      surface = start_surface(on_app_exit: :restart, app_opts: [mount_counter: counter])
+
+      capture_log(fn ->
+        Surface.send_event(surface, key("q"))
+        assert_receive {:EXIT, ^surface, :no_remount}
+      end)
+
+      assert_receive {:terminated, :no_remount}
     end
 
     test "an app server that does not stop in time is killed" do
@@ -272,18 +371,15 @@ defmodule RasterExRatatui.SurfaceTest do
 
   describe "telemetry" do
     setup do
-      id = "surface-test-#{System.unique_integer([:positive])}"
-
-      events = [
+      attach([
         [:raster_ex_ratatui, :surface, :start],
         [:raster_ex_ratatui, :surface, :stop],
         [:raster_ex_ratatui, :frame, :raster, :stop],
         [:raster_ex_ratatui, :frame, :push, :stop],
         [:raster_ex_ratatui, :input, :forward]
-      ]
+      ])
 
-      :telemetry.attach_many(id, events, &__MODULE__.forward_event/4, self())
-      on_exit(fn -> :telemetry.detach(id) end)
+      :ok
     end
 
     test "covers the surface lifecycle, rasterisation, pushes, and input" do
@@ -313,6 +409,13 @@ defmodule RasterExRatatui.SurfaceTest do
 
   def forward_event(event, _measurements, meta, test_pid),
     do: send(test_pid, {:telemetry, event, meta})
+
+  # Forwards `events` to the test process for the rest of the test.
+  defp attach(events) do
+    id = "surface-test-#{System.unique_integer([:positive])}"
+    :telemetry.attach_many(id, events, &__MODULE__.forward_event/4, self())
+    on_exit(fn -> :telemetry.detach(id) end)
+  end
 
   defp flush_mailbox do
     receive do

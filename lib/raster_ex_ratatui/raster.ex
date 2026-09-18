@@ -90,7 +90,7 @@ defmodule RasterExRatatui.Raster do
     * `:scale` — integer magnification of the font's cell (default `1`)
     * `:format_opts` — passed to the format's `c:RasterExRatatui.PixelFormat.init/1` (default `[]`)
 
-  Raises `ArgumentError` when `scale` is not a positive integer or when not even one cell fits on the panel.
+  Raises `ArgumentError` when `:size` or `:format` is missing, when `:size` is not a pair of positive integers, when `:scale` is not a positive integer, or when not even one cell fits on the panel.
 
   ## Examples
 
@@ -101,10 +101,17 @@ defmodule RasterExRatatui.Raster do
   """
   @spec new(keyword()) :: t()
   def new(opts) do
-    {width, height} = size = Keyword.fetch!(opts, :size)
-    format = Keyword.fetch!(opts, :format)
+    size = fetch!(opts, :size)
+    format = fetch!(opts, :format)
     font = Keyword.get(opts, :font, Font.Default6x8)
     scale = Keyword.get(opts, :scale, 1)
+
+    unless match?({w, h} when is_integer(w) and w > 0 and is_integer(h) and h > 0, size) do
+      raise ArgumentError,
+            "expected :size to be {width, height} in pixels, got: #{inspect(size)}"
+    end
+
+    {width, height} = size
 
     unless is_integer(scale) and scale >= 1 do
       raise ArgumentError, "expected :scale to be a positive integer, got: #{inspect(scale)}"
@@ -255,6 +262,13 @@ defmodule RasterExRatatui.Raster do
   end
 
   def apply(%__MODULE__{} = raster, payload), do: __MODULE__.apply(raster, [payload])
+
+  defp fetch!(opts, key) do
+    case Keyword.fetch(opts, key) do
+      {:ok, value} -> value
+      :error -> raise ArgumentError, "missing required option #{inspect(key)}"
+    end
+  end
 
   defp merge_changed(:all, _more), do: :all
   defp merge_changed(_changed, :all), do: :all

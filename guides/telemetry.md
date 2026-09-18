@@ -7,12 +7,13 @@
 ```
 [:raster_ex_ratatui, :surface, :start]   single  — raster built, app server started
 [:raster_ex_ratatui, :surface, :stop]    single  — surface terminating
+[:raster_ex_ratatui, :app, :exit]        single  — the app server exited; the surface stops or restarts it
 [:raster_ex_ratatui, :frame, :raster]    span    — Raster.apply/2 on one diff
 [:raster_ex_ratatui, :frame, :push]      span    — the consumer's push/2
 [:raster_ex_ratatui, :input, :forward]   single  — an event forwarded to the app
 ```
 
-Every event carries `:surface` (the surface module), `:mod` (the app), and `:pid` (the surface process, to tell several surfaces apart). Span events emit `:start` / `:stop` / `:exception` suffixes. The `:frame, :raster` stop event carries `:cells`, `:regions`, and `:patches` counts in its metadata. See `RasterExRatatui.Telemetry` for the full metadata reference.
+Every event carries `:surface` (the surface module), `:mod` (the app), and `:pid` (the surface process, to tell several surfaces apart). Span events emit `:start` / `:stop` / `:exception` suffixes. The `:frame, :raster` stop event carries `:cells`, `:regions`, and `:patches` counts in its metadata; `:app, :exit` carries the app's exit `:reason` and the `:action` taken (`:stop` or `:restart`, the surface's `on_app_exit:` option). See `RasterExRatatui.Telemetry` for the full metadata reference.
 
 ## Quick start: log every event
 

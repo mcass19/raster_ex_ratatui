@@ -15,8 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `RasterExRatatui.Telemetry.probe/3` watches a surface for a few seconds from IEx and reports the raster and push spans (count, median, p90, max) and the surface's mailbox before and after, the quickest way to tell whether a panel keeps up with its app.
 - `RasterExRatatui.PixelFormat` gains an optional `rgb_row/4` callback that packs a whole row of region pixels in one call, plus `RasterExRatatui.PixelFormat.rgb_row/5`, the per-pixel fallback the raster uses for formats without one. `Mono`, `RGB565`, and `XRGB8888` implement it.
+- `on_app_exit: :stop | :restart` on `RasterExRatatui.Surface`. `:stop` (the default) is today's behaviour: the surface exits with the app's reason and its supervisor decides. `:restart` keeps the surface and its raster, starts the app again at once on a fresh cell session, and lets the new app's first render repaint the panel, for a panel that has nothing else to show. Both report the exit as the new `[:raster_ex_ratatui, :app, :exit]` telemetry event, with the `:reason` and the `:action` taken; the default logger prints it.
+- The app's `mount/1` (or reducer `init/1`) options always include `surface:`, a map with the panel `:size` in pixels, the effective `:cell_size`, the `:grid_size` in cells, the `:format`, the `:scale`, and the `:rotate` angle (always `0` for now), so an app can lay itself out for the panel it runs on instead of assuming a cell size.
 
 ### Fixed
+
+- `RasterExRatatui.Raster.new/1` raises `ArgumentError` for a missing `:size` or `:format`, and for a `:size` that is not a pair of positive integers, instead of `KeyError` or `MatchError`. A `RasterExRatatui.Surface` whose `init/1` returns something other than `{:ok, opts, state}` or `{:stop, reason}` raises `ArgumentError` naming the module and the value, instead of `FunctionClauseError`.
 
 - `RasterExRatatui.Input.Evdev.translate_all/2` accepts the `:disconnect` that `input_event` sends in place of the event list when a device goes away: held modifiers are released and no keys are produced. The Linux Framebuffers guide's surface sketch handles it, and stops its reader in `terminate/2`: a reader that is only linked survives a surface that stops normally (its app quit) and keeps its grab on the keyboard, so the next surface's reader was disconnected at once, and the `rpi_framebuffer` example crashed on that message three times and took the application down. The example now does both.
 

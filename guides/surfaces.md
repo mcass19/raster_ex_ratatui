@@ -53,6 +53,8 @@ children = [{Kiosk.Surface, spi_bus: "spidev0.0"}]
 
 `c:RasterExRatatui.Surface.init/1` receives every option (from `use` and from the child spec) and returns the ones it could only learn at runtime, here the panel size read from the driver. Unknown options, such as `:spi_bus`, pass through untouched. The state it returns is threaded through `push/2`.
 
+The app, for its part, learns about the panel from its own options: the surface adds `surface:` to `app_opts`, a map with the panel `:size` in pixels, the effective `:cell_size`, the `:grid_size` in cells, the `:format`, the `:scale`, and the `:rotate` angle. An app that lays itself out differently on a small panel, or that needs the pixel size of a cell to size a pixel region, reads it in `mount/1` (or the reducer's `init/1`).
+
 ## Choosing font, scale, and format
 
 The grid is the panel size divided by the effective cell, which is the font's cell times `:scale`. For a few panel sizes:
@@ -92,7 +94,7 @@ Key codes must match what a terminal would send (lowercase strings, `kind: "pres
 
 ## Crashes and restarts
 
-The surface process links to the app server. If the app crashes, the surface exits with the same reason and its supervisor restarts it, which starts a fresh app and repaints the panel. The generated child spec is `restart: :transient`, as for `ExRatatui.App`, so an app that quits with `{:stop, state}` stays stopped; a kiosk that must always come back overrides `child_spec/1` with `restart: :permanent`. If the surface stops, it stops the app first, waiting up to `:shutdown_timeout` (4 seconds by default) for the app's own `terminate/2` before killing it, so the surface's `c:RasterExRatatui.Surface.terminate/2` still runs within a supervisor's default shutdown budget. There is no crash screen by default; a consumer that wants one (a static frame, say) can trap the exit in its own process and draw it.
+The surface process links to the app server, and `on_app_exit:` says what happens when the app exits. With the default, `:stop`, the surface exits with the same reason and its supervisor decides: the generated child spec is `restart: :transient`, as for `ExRatatui.App`, so a crash restarts the pair (a fresh app, a repainted panel) and an app that quits with `{:stop, state}` stays stopped. With `on_app_exit: :restart` the surface stays up, keeps its raster, opens a fresh cell session, and starts the app again at once; the new app's first render repaints the panel. That is the setting for a kiosk or any panel that has nothing else to show, where a `q` in the app should bring it straight back. Either way the exit is reported as `[:raster_ex_ratatui, :app, :exit]` with the reason and the action taken. If the surface stops, it stops the app first, waiting up to `:shutdown_timeout` (4 seconds by default) for the app's own `terminate/2` before killing it, so the surface's `c:RasterExRatatui.Surface.terminate/2` still runs within a supervisor's default shutdown budget. There is no crash screen by default; a consumer that wants one (a static frame, say) can trap the exit in its own process and draw it.
 
 Processes started in `init/1` with `start_link` are linked to the surface, and since the surface traps exits their `{:EXIT, pid, reason}` messages arrive in `handle_info/2`; handle them there.
 

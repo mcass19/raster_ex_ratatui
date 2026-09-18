@@ -7,14 +7,27 @@ defmodule RasterExRatatui.Test.App do
   alias ExRatatui.Widgets.Paragraph
   alias RasterExRatatui.Test.Frames
 
+  # `notify:` gets `{:mounted, opts}` on every mount; `mount_counter:` (an
+  # Agent holding an integer) makes every mount after the first fail.
   @impl true
   def init(opts) do
-    {:ok,
-     %{
-       text: Keyword.get(opts, :text, "hi"),
-       cube: Keyword.get(opts, :cube, false),
-       hang_terminate: Keyword.get(opts, :hang_terminate, false)
-     }}
+    if pid = Keyword.get(opts, :notify), do: send(pid, {:mounted, opts})
+
+    state = %{
+      text: Keyword.get(opts, :text, "hi"),
+      cube: Keyword.get(opts, :cube, false),
+      hang_terminate: Keyword.get(opts, :hang_terminate, false)
+    }
+
+    case Keyword.get(opts, :mount_counter) do
+      nil ->
+        {:ok, state}
+
+      agent ->
+        if Agent.get_and_update(agent, &{&1, &1 + 1}) == 0,
+          do: {:ok, state},
+          else: {:error, :no_remount}
+    end
   end
 
   @impl true
@@ -64,11 +77,14 @@ defmodule RasterExRatatui.Test.Surface do
 
   @impl true
   def init(opts) do
-    case Keyword.fetch(opts, :init_stop) do
-      {:ok, reason} ->
-        {:stop, reason}
+    cond do
+      Keyword.has_key?(opts, :init_stop) ->
+        {:stop, Keyword.fetch!(opts, :init_stop)}
 
-      :error ->
+      Keyword.has_key?(opts, :init_return) ->
+        Keyword.fetch!(opts, :init_return)
+
+      true ->
         state = %{
           test_pid: Keyword.fetch!(opts, :test_pid),
           push_delay: Keyword.get(opts, :push_delay, 0)

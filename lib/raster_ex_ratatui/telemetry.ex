@@ -25,6 +25,7 @@ defmodule RasterExRatatui.Telemetry do
   | ----- | ----------- | ------------ | -------- |
   | `[:raster_ex_ratatui, :surface, :start]` | The surface built its raster and started the app server. | `%{system_time: integer}` | `:surface`, `:mod`, `:pid`, `:size`, `:grid_size` |
   | `[:raster_ex_ratatui, :surface, :stop]` | The surface is terminating. | `%{system_time: integer}` | `:surface`, `:mod`, `:pid`, `:reason` |
+  | `[:raster_ex_ratatui, :app, :exit]` | The app server exited; `:action` is what the surface does about it per its `on_app_exit:` option, `:stop` or `:restart`. | `%{system_time: integer}` | `:surface`, `:mod`, `:pid`, `:reason`, `:action` |
   | `[:raster_ex_ratatui, :input, :forward]` | An event was forwarded to the app server. | `%{system_time: integer}` | `:surface`, `:mod`, `:pid`, `:event` |
 
   ## Attaching a default logger
@@ -210,6 +211,7 @@ defmodule RasterExRatatui.Telemetry do
     [
       [:raster_ex_ratatui, :surface, :start],
       [:raster_ex_ratatui, :surface, :stop],
+      [:raster_ex_ratatui, :app, :exit],
       [:raster_ex_ratatui, :frame, :raster, :stop],
       [:raster_ex_ratatui, :frame, :raster, :exception],
       [:raster_ex_ratatui, :frame, :push, :stop],

@@ -31,6 +31,24 @@ defmodule RasterExRatatui.RasterTest do
   defp pixels(frame, raster, xs, ys), do: for(y <- ys, x <- xs, do: pixel(frame, raster, x, y))
 
   describe "new/1" do
+    test "requires :size and :format, as ArgumentError" do
+      assert_raise ArgumentError, "missing required option :size", fn ->
+        Raster.new(format: Mono)
+      end
+
+      assert_raise ArgumentError, "missing required option :format", fn ->
+        Raster.new(size: {24, 16})
+      end
+    end
+
+    test "rejects a size that is not a pair of positive integers" do
+      for size <- [{0, 16}, {24, -1}, {24.0, 16}, [24, 16], nil] do
+        assert_raise ArgumentError, ~r/expected :size to be \{width, height\}/, fn ->
+          mono(size)
+        end
+      end
+    end
+
     test "rejects a non-positive or non-integer scale" do
       for scale <- [0, -1, 1.5, nil] do
         assert_raise ArgumentError, ~r/:scale/, fn -> mono({24, 16}, scale: scale) end
