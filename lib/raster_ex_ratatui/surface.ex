@@ -39,9 +39,10 @@ defmodule RasterExRatatui.Surface do
   Accepted by `use`, by `start_link/1`, and in the keyword list `c:init/1` returns (later wins, in that order):
 
     * `:app` (required) — the `ExRatatui.App` module to run
-    * `:app_opts` — keyword list passed to the app's `mount/1` (or reducer `init/1`), default `[]`. The surface adds `surface:` to it, a map describing the panel the app is on: `:size` (pixels), `:cell_size` (the effective cell in pixels), `:grid_size` (cells), `:format`, `:scale`, and `:rotate`
-    * `:size` (required) — panel size in pixels, `{width, height}`
+    * `:app_opts` — keyword list passed to the app's `mount/1` (or reducer `init/1`), default `[]`. The surface adds `surface:` to it, a map describing the panel the app is on: `:size` (the physical panel in pixels), `:cell_size` (the effective cell in pixels), `:grid_size` (cells), `:format`, `:scale`, and `:rotate`
+    * `:size` (required) — the physical panel size in pixels, `{width, height}`
     * `:format` (required) — a `RasterExRatatui.PixelFormat` module
+    * `:rotate` — `0` (default), `90`, `180`, or `270`: how far clockwise the app's image is turned on the panel, for a panel mounted on its side. The grid follows the turned image; patches and frames stay in the panel's own coordinates, so `c:push/2` does not change
     * `:font`, `:scale`, `:format_opts` — see `RasterExRatatui.Raster.new/1`
     * `:push_mode` — `:patches` (default) calls `c:push/2` with the changed rectangles; `:frame` calls it with `{:frame, binary}`, the whole panel, for panels that only take full frames
     * `:min_interval` — minimum milliseconds between two pushes (default `0`). Renders arriving sooner wait, and are rasterised together and pushed once when the interval has passed, which keeps slow panels (e-ink, SPI at low baud) from refreshing more often than they should

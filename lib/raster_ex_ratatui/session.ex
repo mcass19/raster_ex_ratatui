@@ -48,7 +48,7 @@ defmodule RasterExRatatui.Session do
   `start/2` takes:
 
     * `:app` (required) — the `ExRatatui.App` module to run
-    * `:app_opts` — keyword list passed to the app's `mount/1` (or reducer `init/1`), default `[]`. The session adds `surface:` to it, a map describing the panel: `:size` (pixels), `:cell_size` (the effective cell in pixels), `:grid_size` (cells), `:format`, `:scale`, and `:rotate`
+    * `:app_opts` — keyword list passed to the app's `mount/1` (or reducer `init/1`), default `[]`. The session adds `surface:` to it, a map describing the panel: `:size` (the physical panel in pixels), `:cell_size` (the effective cell in pixels), `:grid_size` (cells), `:format`, `:scale`, and `:rotate` (see `RasterExRatatui.Raster`'s rotation section)
     * `:keep_frame` — keep a full frame of the panel up to date (default `false`). `frame/1` then returns it at no cost, and `render/2` applies each patch to it, for panels that only take whole frames
     * `:shutdown_timeout` — milliseconds `stop/1` waits for the app server before killing it (default `4_000`)
 
@@ -290,7 +290,7 @@ defmodule RasterExRatatui.Session do
       grid_size: Raster.grid_size(raster),
       format: raster.format,
       scale: raster.scale,
-      rotate: 0
+      rotate: Raster.rotate(raster)
     }
   end
 

@@ -102,6 +102,21 @@ Processes started in `init/1` with `start_link` are linked to the surface, and s
 
 `RasterExRatatui.Surface.resize/2` changes the panel size (a display that comes back at another resolution). The raster and the session are rebuilt, the app receives an `ExRatatui.Event.Resize`, and the next render repaints the whole panel.
 
+## Rotation
+
+A panel keeps its native scan order however it is mounted: the Raspberry Pi Touch Display 2 is a 720×1280 portrait framebuffer even on a landscape stand. `rotate: 90` (or `180`, `270`, clockwise) turns the app's image on its way to the panel:
+
+```elixir
+use RasterExRatatui.Surface,
+  app: Kiosk.Dashboard,
+  format: RasterExRatatui.PixelFormat.RGB565,
+  size: {720, 1280},
+  scale: 2,
+  rotate: 90
+```
+
+`:size` stays the physical panel, and so do the patches, the frame, and `push/2`: the panel driver never knows. The grid is that of the turned image (1280×720 here, 106×45 cells at scale 2 instead of 60×80), the app receives it as its width and height and as `grid_size` in `surface:`, and `RasterExRatatui.Raster.logical_size/1` reports it. Glyphs are rotated once as they enter the raster's cache, a run of cells becomes a vertical strip, and pixel regions are gathered from their bitmaps already turned, so a rotated frame costs about what a flat one does. Dithering and checkerboards stay anchored to the panel's own pixels. The [Linux Framebuffers](framebuffer.md) guide has the console side of a rotated panel.
+
 ## Testing a surface
 
 Everything runs on the host: a surface whose `push/2` sends patches to the test process drives the real app, and `RasterExRatatui.Surface.raster/1` returns the raster, so `RasterExRatatui.Raster.frame/1` shows exactly what the panel would.

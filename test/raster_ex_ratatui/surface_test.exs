@@ -131,6 +131,19 @@ defmodule RasterExRatatui.SurfaceTest do
       assert opts[:transport] == :cell_session
     end
 
+    test "rotate: turns the grid and keeps the pushes inside the physical panel" do
+      surface = start_surface(size: {160, 240}, rotate: 270, app_opts: [notify: self()])
+
+      assert_receive {:mounted, opts}
+      assert %{size: {160, 240}, grid_size: {40, 20}, rotate: 270} = opts[:surface]
+      assert Raster.grid_size(Surface.raster(surface)) == {40, 20}
+
+      Surface.send_event(surface, key("a"))
+      # The third cell of the top row, (12, 0, 6, 8) to the app: at 270 the
+      # app's top edge is the panel's left edge, and its x runs up the panel.
+      assert_receive {:pushed, [%Patch{x: 0, y: 222, width: 8, height: 6}]}
+    end
+
     test "use defaults: child_spec, init/1 returning the options, handle_info/2, terminate/2" do
       surface = start_supervised!({DefaultSurface, test_pid: self()})
 

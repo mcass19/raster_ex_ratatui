@@ -28,6 +28,24 @@ defmodule RasterExRatatui.Raster do
   `apply/2` also takes a **list** of payloads and rasterises them as one: the grid is folded through all of them first, so a cell or region that changed several times is drawn once, in its final state. A consumer that falls behind its app (a slow panel, a big pixel region) folds everything queued into one call instead of drawing frames nobody will see; the surface process does exactly that.
 
   Patches must be written in list order. `frame/1` renders the whole panel as one buffer for panels that only take full frames (`render_frame/1` does the same and keeps the glyph cache it fills); writing `apply/2`'s patches over the previous `frame/1` gives the next one.
+
+  ## Rotation
+
+  A panel mounted on its side keeps its native scan order: `/dev/fb0` on a portrait display is portrait however the stand holds it. `rotate: 90 | 180 | 270` turns the app's image clockwise on the way to the panel. `:size` stays the **physical** panel; the grid is computed from the **logical** size, which is the physical size with width and height swapped for 90 and 270 (`logical_size/1`); and every patch, `frame/1`, and `margin/1` come out in physical coordinates, so whatever writes the panel does not know the difference.
+
+      rotate: 90 on a 720×1280 panel      logical (x, y) → physical
+                                            90:  (W - 1 - y, x)
+        logical 1280×720  ─┐               180:  (W - 1 - x, H - 1 - y)
+        ┌───────────────┐  │ clockwise     270:  (y, H - 1 - x)
+        │ A B C         │  │               W, H: the physical size
+        └───────────────┘  ▼
+                        ┌─────┐
+                        │ A   │  physical 720×1280
+                        │ B   │  (the app's top edge is on the right)
+                        │ C   │
+                        └─────┘
+
+  Glyphs are rotated once as they enter the cache; a run of cells becomes a vertical strip; a pixel region is gathered from its bitmap already rotated, one panel row at a time. Dithering and checkerboards stay anchored to the panel's own pixel grid, which is what a 1-bit panel wants.
   """
 
   alias ExRatatui.CellSession.{Cell, Diff, Region, Snapshot}
@@ -40,8 +58,13 @@ defmodule RasterExRatatui.Raster do
   @typedoc "What `apply/2` folds in: a cell diff or a snapshot from an `ExRatatui.CellSession`."
   @type payload :: Snapshot.t() | Diff.t()
 
+  @typedoc "Clockwise rotation of the app's image on the panel, in degrees."
+  @type rotation :: 0 | 90 | 180 | 270
+
   @type t :: %__MODULE__{
           size: size(),
+          logical_size: size(),
+          rotate: rotation(),
           font: Font.t(),
           format: PixelFormat.t(),
           config: PixelFormat.config(),
@@ -56,6 +79,8 @@ defmodule RasterExRatatui.Raster do
 
   @enforce_keys [
     :size,
+    :logical_size,
+    :rotate,
     :font,
     :format,
     :config,
@@ -67,6 +92,8 @@ defmodule RasterExRatatui.Raster do
   ]
   defstruct [
     :size,
+    :logical_size,
+    :rotate,
     :font,
     :format,
     :config,
@@ -79,18 +106,21 @@ defmodule RasterExRatatui.Raster do
     cache: %{}
   ]
 
+  @rotations [0, 90, 180, 270]
+
   @doc """
   Builds a raster for a panel.
 
   ## Options
 
-    * `:size` (required) — panel size in pixels, `{width, height}`
+    * `:size` (required) — the physical panel size in pixels, `{width, height}`
     * `:format` (required) — a `RasterExRatatui.PixelFormat` module
     * `:font` — a `RasterExRatatui.Font` module (default `RasterExRatatui.Font.Default6x8`)
     * `:scale` — integer magnification of the font's cell (default `1`)
+    * `:rotate` — `0`, `90`, `180`, or `270`: how far clockwise the app's image is turned on the panel (default `0`, see the moduledoc)
     * `:format_opts` — passed to the format's `c:RasterExRatatui.PixelFormat.init/1` (default `[]`)
 
-  Raises `ArgumentError` when `:size` or `:format` is missing, when `:size` is not a pair of positive integers, when `:scale` is not a positive integer, or when not even one cell fits on the panel.
+  Raises `ArgumentError` when `:size` or `:format` is missing, when `:size` is not a pair of positive integers, when `:scale` is not a positive integer, when `:rotate` is not one of the four angles, or when not even one cell fits on the panel.
 
   ## Examples
 
@@ -98,6 +128,13 @@ defmodule RasterExRatatui.Raster do
       iex> raster = Raster.new(size: {1920, 1080}, format: PixelFormat.XRGB8888, scale: 3)
       iex> {Raster.grid_size(raster), Raster.font_size(raster), Raster.margin(raster)}
       {{106, 45}, {18, 24}, {12, 0}}
+
+  A portrait panel on a landscape stand: the grid is that of the turned image.
+
+      iex> alias RasterExRatatui.{Raster, PixelFormat}
+      iex> raster = Raster.new(size: {720, 1280}, format: PixelFormat.RGB565, scale: 2, rotate: 90)
+      iex> {Raster.size(raster), Raster.logical_size(raster), Raster.grid_size(raster)}
+      {{720, 1280}, {1280, 720}, {106, 45}}
   """
   @spec new(keyword()) :: t()
   def new(opts) do
@@ -105,44 +142,65 @@ defmodule RasterExRatatui.Raster do
     format = fetch!(opts, :format)
     font = Keyword.get(opts, :font, Font.Default6x8)
     scale = Keyword.get(opts, :scale, 1)
-
-    unless match?({w, h} when is_integer(w) and w > 0 and is_integer(h) and h > 0, size) do
-      raise ArgumentError,
-            "expected :size to be {width, height} in pixels, got: #{inspect(size)}"
-    end
-
-    {width, height} = size
+    rotate = Keyword.get(opts, :rotate, 0)
 
     unless is_integer(scale) and scale >= 1 do
       raise ArgumentError, "expected :scale to be a positive integer, got: #{inspect(scale)}"
     end
 
-    {font_w, font_h} = font.cell_size()
-    {cell_w, cell_h} = {font_w * scale, font_h * scale}
-    grid_size = {div(width, cell_w), div(height, cell_h)}
-
-    if elem(grid_size, 0) == 0 or elem(grid_size, 1) == 0 do
-      raise ArgumentError,
-            "a #{width}x#{height} panel fits no #{cell_w}x#{cell_h} cell (font #{inspect(font)}, scale #{scale})"
+    unless rotate in @rotations do
+      raise ArgumentError, "expected :rotate to be 0, 90, 180, or 270, got: #{inspect(rotate)}"
     end
 
     config = format.init(Keyword.get(opts, :format_opts, []))
 
     %__MODULE__{
       size: size,
+      logical_size: size,
+      rotate: rotate,
       font: font,
       format: format,
       config: config,
       scale: scale,
-      cell_size: {cell_w, cell_h},
-      grid_size: grid_size,
+      cell_size: font.cell_size(),
+      grid_size: size,
       bytes_per_pixel: format.bytes_per_pixel(config),
       blank: format.blank(config)
+    }
+    |> geometry(size)
+  end
+
+  # Everything that follows from the physical size: the logical size, the
+  # effective cell, and the grid. Shared by `new/1` and `resize/2`.
+  defp geometry(%__MODULE__{font: font, scale: scale, rotate: rotate} = raster, size) do
+    unless match?({w, h} when is_integer(w) and w > 0 and is_integer(h) and h > 0, size) do
+      raise ArgumentError,
+            "expected :size to be {width, height} in pixels, got: #{inspect(size)}"
+    end
+
+    {width, height} = size
+    {logical_w, logical_h} = logical = if rotate in [90, 270], do: {height, width}, else: size
+    {font_w, font_h} = font.cell_size()
+    {cell_w, cell_h} = {font_w * scale, font_h * scale}
+    grid_size = {div(logical_w, cell_w), div(logical_h, cell_h)}
+
+    if elem(grid_size, 0) == 0 or elem(grid_size, 1) == 0 do
+      raise ArgumentError,
+            "a #{width}x#{height} panel fits no #{cell_w}x#{cell_h} cell (font #{inspect(font)}, scale #{scale}, rotate #{rotate})"
+    end
+
+    %{
+      raster
+      | size: size,
+        logical_size: logical,
+        cell_size: {cell_w, cell_h},
+        grid_size: grid_size,
+        grid: %Grid{}
     }
   end
 
   @doc """
-  Panel size in pixels, `{width, height}`.
+  The physical panel size in pixels, `{width, height}`: what patches and `frame/1` are laid out for.
 
   ## Examples
 
@@ -151,6 +209,28 @@ defmodule RasterExRatatui.Raster do
   """
   @spec size(t()) :: size()
   def size(%__MODULE__{size: size}), do: size
+
+  @doc """
+  The size of the app's image in pixels, `{width, height}`: the physical size, with width and height swapped when the raster rotates by 90 or 270.
+
+  ## Examples
+
+      iex> RasterExRatatui.Raster.new(size: {400, 300}, format: RasterExRatatui.PixelFormat.Mono, rotate: 270) |> RasterExRatatui.Raster.logical_size()
+      {300, 400}
+  """
+  @spec logical_size(t()) :: size()
+  def logical_size(%__MODULE__{logical_size: size}), do: size
+
+  @doc """
+  How far clockwise the app's image is turned on the panel: `0`, `90`, `180`, or `270`.
+
+  ## Examples
+
+      iex> RasterExRatatui.Raster.new(size: {400, 300}, format: RasterExRatatui.PixelFormat.Mono) |> RasterExRatatui.Raster.rotate()
+      0
+  """
+  @spec rotate(t()) :: rotation()
+  def rotate(%__MODULE__{rotate: rotate}), do: rotate
 
   @doc """
   Grid size in cells, `{cols, rows}`: the size to create the `ExRatatui.CellSession` with.
@@ -175,16 +255,19 @@ defmodule RasterExRatatui.Raster do
   def font_size(%__MODULE__{cell_size: cell_size}), do: cell_size
 
   @doc """
-  The unused strips on the right and at the bottom, in pixels, `{right, bottom}`.
+  The unused strips on the right and at the bottom of the app's image, in pixels, `{right, bottom}`. On a rotated raster they are on the right and at the bottom as the app sees them; on the panel they are wherever the rotation puts them.
 
   ## Examples
 
       iex> RasterExRatatui.Raster.new(size: {400, 300}, format: RasterExRatatui.PixelFormat.Mono) |> RasterExRatatui.Raster.margin()
       {4, 4}
+
+      iex> RasterExRatatui.Raster.new(size: {300, 400}, format: RasterExRatatui.PixelFormat.Mono, rotate: 90) |> RasterExRatatui.Raster.margin()
+      {4, 4}
   """
   @spec margin(t()) :: {non_neg_integer(), non_neg_integer()}
   def margin(%__MODULE__{
-        size: {width, height},
+        logical_size: {width, height},
         cell_size: {cell_w, cell_h},
         grid_size: {cols, rows}
       }) do
@@ -209,7 +292,7 @@ defmodule RasterExRatatui.Raster do
   def grid(%__MODULE__{grid: grid}), do: grid
 
   @doc """
-  Rebuilds the geometry for a new panel size, keeping font, format, and scale, and clears the grid.
+  Rebuilds the geometry for a new physical panel size, keeping font, format, scale, rotation, and the glyph cache, and clears the grid.
 
   After a resize the `ExRatatui.CellSession` must be resized to the new `grid_size/1`; its next diff is a full payload, so `apply/2` repaints the whole panel.
 
@@ -219,12 +302,14 @@ defmodule RasterExRatatui.Raster do
       iex> raster = Raster.new(size: {400, 300}, format: RasterExRatatui.PixelFormat.Mono)
       iex> raster |> Raster.resize({120, 80}) |> Raster.grid_size()
       {20, 10}
+
+      iex> alias RasterExRatatui.Raster
+      iex> raster = Raster.new(size: {400, 300}, format: RasterExRatatui.PixelFormat.Mono, rotate: 90)
+      iex> raster |> Raster.resize({80, 120}) |> Raster.grid_size()
+      {20, 10}
   """
   @spec resize(t(), size()) :: t()
-  def resize(%__MODULE__{} = raster, size) do
-    new(size: size, font: raster.font, format: raster.format, scale: raster.scale)
-    |> Map.merge(%{config: raster.config, blank: raster.blank, cache: raster.cache})
-  end
+  def resize(%__MODULE__{} = raster, size), do: geometry(raster, size)
 
   @doc """
   Folds a snapshot or diff, or a list of them in order, into the raster and returns the patches that repaint what changed.
@@ -327,33 +412,70 @@ defmodule RasterExRatatui.Raster do
     line = width * bpp
     blank_line = :binary.copy(raster.blank, width)
 
-    spans =
-      patches
-      |> Enum.reverse()
-      |> Enum.reduce(%{}, fn %Patch{} = patch, acc ->
-        span = patch.width * bpp
+    # A scanline sweep: the patches covering the current row, kept in x
+    # order, each contributing one slice. There are few patches and many
+    # rows (a rotated frame has one cell strip per row of the grid, each
+    # crossing almost every panel row), so this stays cheap where a map of
+    # every slice does not.
+    starts = patches |> Enum.with_index() |> Enum.group_by(fn {patch, _order} -> patch.y end)
 
-        Enum.reduce(0..(patch.height - 1)//1, acc, fn r, acc ->
-          slice = {patch.x * bpp, binary_part(patch.data, r * span, span)}
-          Map.update(acc, patch.y + r, [slice], &[slice | &1])
-        end)
+    {rows, _active} =
+      Enum.map_reduce(0..(height - 1), [], fn y, active ->
+        active = sweep(active, Map.get(starts, y, []), y)
+
+        slices =
+          for {%Patch{} = patch, order} <- active do
+            span = patch.width * bpp
+            {patch.x * bpp, binary_part(patch.data, (y - patch.y) * span, span), order}
+          end
+
+        {compose_row(slices, line, blank_line), active}
       end)
 
-    frame =
-      for y <- 0..(height - 1), into: <<>> do
-        spans
-        |> Map.get(y, [])
-        |> Enum.reduce(blank_line, fn {offset, bytes}, acc ->
-          size = byte_size(bytes)
-          tail = offset + size
-
-          <<binary_part(acc, 0, offset)::binary, bytes::binary,
-            binary_part(acc, tail, line - tail)::binary>>
-        end)
-      end
-
-    {raster, frame}
+    {raster, IO.iodata_to_binary(rows)}
   end
+
+  # The patches covering row `y`, in x order: the ones still active from
+  # the row before, minus those that ended, plus those that start here.
+  defp sweep(active, [], y),
+    do: Enum.reject(active, fn {patch, _order} -> patch.y + patch.height <= y end)
+
+  defp sweep(active, started, y) do
+    Enum.sort_by(sweep(active, [], y) ++ started, fn {patch, order} -> {patch.x, order} end)
+  end
+
+  # One frame row, as iodata, from its `{offset, bytes, order}` slices in x
+  # order. Every row has at least one: the grid and the margins cover the
+  # panel. Slices that do not overlap (the usual case, and every case
+  # without regions) are laid end to end with blank gaps, never copying the
+  # row. Slices that do overlap (regions over regions) are written over the
+  # row in patch order, so the later wins.
+  defp compose_row(slices, line, blank_line) do
+    if overlapping?(slices) do
+      slices
+      |> Enum.sort_by(&elem(&1, 2))
+      |> Enum.reduce(blank_line, fn {offset, bytes, _order}, acc ->
+        tail = offset + byte_size(bytes)
+
+        <<binary_part(acc, 0, offset)::binary, bytes::binary,
+          binary_part(acc, tail, line - tail)::binary>>
+      end)
+    else
+      fill_row(slices, 0, line, blank_line)
+    end
+  end
+
+  defp fill_row([], at, line, blank_line), do: [binary_part(blank_line, at, line - at)]
+
+  defp fill_row([{offset, bytes, _order} | rest], at, line, blank_line) do
+    gap = binary_part(blank_line, at, offset - at)
+    [gap, bytes | fill_row(rest, offset + byte_size(bytes), line, blank_line)]
+  end
+
+  defp overlapping?([{offset, bytes, _}, {next, _, _} = slice | rest]),
+    do: offset + byte_size(bytes) > next or overlapping?([slice | rest])
+
+  defp overlapping?(_one_or_none), do: false
 
   # -- patches ---------------------------------------------------------------
 
@@ -369,7 +491,7 @@ defmodule RasterExRatatui.Raster do
   end
 
   defp margin_patches(%__MODULE__{} = raster) do
-    {width, height} = raster.size
+    {width, height} = raster.logical_size
     {right, bottom} = margin(raster)
     {cols, rows} = raster.grid_size
     {cell_w, cell_h} = raster.cell_size
@@ -379,10 +501,55 @@ defmodule RasterExRatatui.Raster do
       {0, rows * cell_h, width - right, bottom}
     ]
     |> Enum.filter(fn {_x, _y, w, h} -> w > 0 and h > 0 end)
-    |> Enum.map(fn {x, y, w, h} ->
+    |> Enum.map(fn rect ->
+      {x, y, w, h} = physical_rect(raster, rect)
       %Patch{x: x, y: y, width: w, height: h, data: :binary.copy(raster.blank, w * h)}
     end)
   end
+
+  # -- rotation --------------------------------------------------------------
+
+  # A rectangle of the app's image, `{x, y, width, height}`, as the panel
+  # sees it. The corner mapping is the moduledoc's: logical (x, y) goes to
+  # (W - 1 - y, x) for 90, (W - 1 - x, H - 1 - y) for 180, (y, H - 1 - x)
+  # for 270, with W × H the physical size.
+  defp physical_rect(%__MODULE__{rotate: 0}, rect), do: rect
+
+  defp physical_rect(%__MODULE__{rotate: 90, size: {pw, _ph}}, {x, y, w, h}),
+    do: {pw - y - h, x, h, w}
+
+  defp physical_rect(%__MODULE__{rotate: 180, size: {pw, ph}}, {x, y, w, h}),
+    do: {pw - x - w, ph - y - h, w, h}
+
+  defp physical_rect(%__MODULE__{rotate: 270, size: {_pw, ph}}, {x, y, w, h}),
+    do: {y, ph - x - w, h, w}
+
+  # A row-major block of `w × h` packed pixels turned by the raster's angle.
+  # Used once per glyph block, on its way into the cache.
+  defp rotate_pixels(%__MODULE__{rotate: 0}, data, _w, _h), do: data
+
+  defp rotate_pixels(%__MODULE__{rotate: rotate, bytes_per_pixel: bpp}, data, w, h) do
+    {out_w, out_h} = if rotate == 180, do: {w, h}, else: {h, w}
+
+    for py <- 0..(out_h - 1), px <- 0..(out_w - 1), into: <<>> do
+      {x, y} =
+        case rotate do
+          90 -> {py, h - 1 - px}
+          180 -> {w - 1 - px, h - 1 - py}
+          270 -> {w - 1 - py, px}
+        end
+
+      binary_part(data, (y * w + x) * bpp, bpp)
+    end
+  end
+
+  # What to add to a logical pixel's `x + y` to get the parity of the
+  # physical pixel it lands on, so checkerboards stay on the panel's grid:
+  # rotation adds a constant to x + y (mod 2) per the corner mapping above.
+  defp parity_offset(%__MODULE__{rotate: 0}), do: 0
+  defp parity_offset(%__MODULE__{rotate: 90, size: {pw, _ph}}), do: pw - 1
+  defp parity_offset(%__MODULE__{rotate: 180, size: {pw, ph}}), do: pw + ph
+  defp parity_offset(%__MODULE__{rotate: 270, size: {_pw, ph}}), do: ph - 1
 
   # Positions of every cell inside the grid that a region covers.
   defp region_cells(%__MODULE__{grid_size: {cols, rows}}, regions) do
@@ -464,25 +631,33 @@ defmodule RasterExRatatui.Raster do
     )
   end
 
+  # A run of cells on one row. The blocks come out of the cache already
+  # rotated: at 0 and 180 the run is one row of blocks (reversed at 180),
+  # interleaved row by row; at 90 and 270 it is a vertical strip, the blocks
+  # simply stacked (bottom to top at 270).
   defp run_patch(%__MODULE__{} = raster, {row, first, last}) do
     {cell_w, cell_h} = raster.cell_size
-    line = cell_w * raster.bytes_per_pixel
     {blocks, raster} = Enum.map_reduce(first..last, raster, &cell_block(&2, &1, row))
 
+    {x, y, width, height} =
+      physical_rect(raster, {first * cell_w, row * cell_h, (last - first + 1) * cell_w, cell_h})
+
     data =
-      for dy <- 0..(cell_h - 1), block <- blocks, into: <<>> do
-        binary_part(block, dy * line, line)
+      case raster.rotate do
+        0 -> interleave(blocks, cell_w * raster.bytes_per_pixel, cell_h)
+        180 -> interleave(Enum.reverse(blocks), cell_w * raster.bytes_per_pixel, cell_h)
+        90 -> IO.iodata_to_binary(blocks)
+        270 -> IO.iodata_to_binary(Enum.reverse(blocks))
       end
 
-    patch = %Patch{
-      x: first * cell_w,
-      y: row * cell_h,
-      width: (last - first + 1) * cell_w,
-      height: cell_h,
-      data: data
-    }
+    {%Patch{x: x, y: y, width: width, height: height, data: data}, raster}
+  end
 
-    {patch, raster}
+  # Blocks side by side: row `dy` of the result is row `dy` of each block.
+  defp interleave(blocks, line, rows) do
+    for dy <- 0..(rows - 1), block <- blocks, into: <<>> do
+      binary_part(block, dy * line, line)
+    end
   end
 
   defp region_patches(%__MODULE__{} = raster, regions) do
@@ -499,17 +674,19 @@ defmodule RasterExRatatui.Raster do
     rect_h = min(region.height * cell_h, rows * cell_h - y0)
 
     if rect_w > 0 and rect_h > 0 do
-      rows = region_rows(raster, region, {x0, y0}, {rect_w, rect_h})
-      %Patch{x: x0, y: y0, width: rect_w, height: rect_h, data: IO.iodata_to_binary(rows)}
+      {x, y, width, height} = physical = physical_rect(raster, {x0, y0, rect_w, rect_h})
+      rows = region_rows(raster, region, {rect_w, rect_h}, physical)
+      %Patch{x: x, y: y, width: width, height: height, data: IO.iodata_to_binary(rows)}
     end
   end
 
-  # One packed row per panel row of the rect, through the format's row path.
+  # One packed row per panel row of the rect, through the format's row path,
+  # which receives panel coordinates so dithering stays anchored to the panel.
   defp region_rows(
-         %__MODULE__{} = raster,
+         %__MODULE__{rotate: 0} = raster,
          %Region{pixel_width: pw, pixel_height: ph} = region,
-         {x0, y0},
-         {rect_w, rect_h}
+         {rect_w, rect_h},
+         {x0, y0, _rect_w, _rect_h}
        ) do
     {cell_w, cell_h} = raster.cell_size
     %{format: format, config: config} = raster
@@ -535,6 +712,45 @@ defmodule RasterExRatatui.Raster do
     rows
   end
 
+  # Rotated: each panel row of the patch gathers its samples straight from
+  # the bitmap. At 90 and 270 a panel row is a column of the app's image, so
+  # the per-row key is a source column and the per-pixel offsets walk source
+  # rows; at 180 it is a source row walked backwards. Rows sharing a key (an
+  # upscaled region) are gathered once.
+  defp region_rows(
+         %__MODULE__{rotate: rotate} = raster,
+         %Region{pixel_width: pw, pixel_height: ph} = region,
+         {rect_w, rect_h},
+         {x0, y0, out_w, out_h}
+       ) do
+    {cell_w, cell_h} = raster.cell_size
+    %{format: format, config: config} = raster
+    full_w = region.width * cell_w
+    full_h = region.height * cell_h
+    column = fn dx -> div(dx * pw, full_w) * 3 end
+    line = fn dy -> div(dy * ph, full_h) * pw * 3 end
+
+    {offsets, key} =
+      case rotate do
+        90 -> {for(px <- 0..(out_w - 1), do: line.(rect_h - 1 - px)), column}
+        180 -> {for(px <- 0..(out_w - 1), do: column.(rect_w - 1 - px)), &line.(rect_h - 1 - &1)}
+        270 -> {for(px <- 0..(out_w - 1), do: line.(px)), &column.(rect_w - 1 - &1)}
+      end
+
+    {rows, _last} =
+      Enum.map_reduce(0..(out_h - 1), {-1, nil}, fn py, {last_key, last_row} ->
+        k = key.(py)
+        row = if k == last_key, do: last_row, else: gather(region.data, offsets, k)
+        {PixelFormat.rgb_row(format, row, x0, y0 + py, config), {k, row}}
+      end)
+
+    rows
+  end
+
+  defp gather(data, offsets, base) do
+    for offset <- offsets, into: <<>>, do: binary_part(data, offset + base, 3)
+  end
+
   defp source_row(data, sy, pw, nil), do: binary_part(data, sy * pw * 3, pw * 3)
 
   defp source_row(data, sy, pw, gather) do
@@ -554,7 +770,12 @@ defmodule RasterExRatatui.Raster do
 
     {fg, bg} = raster.format.cell_paints(cell, raster.config)
     {cell_w, cell_h} = raster.cell_size
-    parity = if is_binary(fg) and is_binary(bg), do: 0, else: rem(col * cell_w + row * cell_h, 2)
+
+    parity =
+      if is_binary(fg) and is_binary(bg),
+        do: 0,
+        else: rem(parity_offset(raster) + col * cell_w + row * cell_h, 2)
+
     codepoint = Font.codepoint(cell.symbol)
     key = {codepoint, fg, bg, parity}
 
@@ -563,7 +784,14 @@ defmodule RasterExRatatui.Raster do
         {block, raster}
 
       cache ->
-        block = render_block(raster, raster.font.glyph(codepoint), fg, bg, parity)
+        block =
+          rotate_pixels(
+            raster,
+            render_block(raster, raster.font.glyph(codepoint), fg, bg, parity),
+            cell_w,
+            cell_h
+          )
+
         cache = if map_size(cache) >= @cache_limit, do: %{}, else: cache
         {block, %{raster | cache: Map.put(cache, key, block)}}
     end

@@ -92,6 +92,10 @@ end
 
 The display drivers are kernel modules that load while the system boots, so `/dev/fb0` can appear seconds after the application starts (on the Pi 4 the DSI panel probed about ten seconds after the app). A surface that fails on its first look takes the application down with it; the example keeps trying `Framebuffer.open/2` for thirty seconds instead.
 
+## A panel on its side
+
+A framebuffer has the panel's native orientation whatever the stand does: the Touch Display 2 is 720×1280 portrait on a landscape stand. The kernel can turn its own console (`video=DSI-1:720x1280@60,rotate=90` on the command line, or fbcon's `rotate_all`), but that never changes what a write to `/dev/fb0` means; the device stays portrait. Turning the app is the raster's job: `rotate: 90` (or `270`, whichever way the stand holds it) on the surface gives the app a 1280×720 image and writes the panel in its native order, so nothing about the framebuffer side changes. See "Rotation" in [Building a Surface](surfaces.md).
+
 ## Keep the console off the display
 
 The kernel's framebuffer console draws on the same device, so boot messages, a login prompt, or a blinking cursor can appear on top of the app.

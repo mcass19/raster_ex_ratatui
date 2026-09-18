@@ -31,7 +31,7 @@ end
 
 - `push/2` is the only required callback. It receives `[%RasterExRatatui.Patch{}]` (default) or `{:frame, binary}` with `push_mode: :frame`, and **must return the new state**, not `:ok`.
 - `init/1` returns `{:ok, extra_opts, state}`: a **three**-tuple. `extra_opts` is a keyword list merged over the `use`/`start_link` options, for values known only at runtime (`:size`, `:format`).
-- Options merge in order `use` < `start_link` < `init/1`'s keyword. `:app`, `:size`, and `:format` are required somewhere in that chain.
+- Options merge in order `use` < `start_link` < `init/1`'s keyword. `:app`, `:size`, and `:format` are required somewhere in that chain. `rotate:` (90, 180, 270) turns the app for a panel on its side; `:size` stays physical and `push/2` does not change.
 - Write patches **in list order**; a region patch may overlap earlier cell patches. `data` is row-major with no stride padding.
 - Send input with `RasterExRatatui.Surface.send_event(surface, %ExRatatui.Event.Key{code: "enter", kind: "press"})`. Codes are lowercase strings and `kind` is the string `"press"`, never an atom.
 - From `handle_info/2`, return `{:events, [event], state}` to forward events, `{:noreply, state}` otherwise.
@@ -72,6 +72,7 @@ frame = RasterExRatatui.Raster.frame(raster)
 - `Raster` is an immutable value: keep the struct `apply/2` returns, or the next diff is folded into a stale grid.
 - Feed **every** diff to `apply/2`, in order, even when not pushing; diffs are deltas.
 - `:scale` is a positive integer; the effective cell is font cell × scale.
+- `rotate: 90 | 180 | 270` turns the app's image clockwise on the panel. `:size` is **always the physical panel**; the grid, `logical_size/1`, and `margin/1` follow the turned image, while patches, `frame/1`, and `resize/2` stay physical. Never swap `:size` by hand to rotate.
 - `new/1` raises `ArgumentError` (never `KeyError`) for a missing `:size` or `:format`, a `:size` that is not two positive integers, a bad `:scale`, or a panel too small for one cell.
 
 ## Formats and palettes

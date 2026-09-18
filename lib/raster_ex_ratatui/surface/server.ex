@@ -21,7 +21,7 @@ defmodule RasterExRatatui.Surface.Server do
 
   alias RasterExRatatui.{Raster, Session, Telemetry}
 
-  @raster_keys [:size, :font, :format, :scale, :format_opts]
+  @raster_keys [:size, :font, :format, :scale, :rotate, :format_opts]
 
   defstruct [
     :module,

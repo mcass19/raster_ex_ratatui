@@ -193,6 +193,20 @@ defmodule RasterExRatatui.SessionTest do
     end
   end
 
+  test "a rotated raster gives the app the turned grid and the physical panel" do
+    raster = Raster.new(size: {160, 240}, format: Mono, rotate: 90)
+    {:ok, session} = start(raster, app_opts: [notify: self()])
+
+    assert_receive {:mounted, opts}
+    assert %{size: {160, 240}, grid_size: {40, 20}, rotate: 90} = opts[:surface]
+    assert opts[:width] == 40
+
+    assert {:render, patches, session} = Session.await(session)
+    assert area(patches) == 160 * 240
+    assert Enum.all?(patches, &(&1.x + &1.width <= 160 and &1.y + &1.height <= 240))
+    assert :ok = Session.stop(session)
+  end
+
   test "frame/1 renders the raster without keep_frame", %{raster: raster} do
     session = start_rendered(raster)
     assert Session.frame(session) == Raster.frame(Session.raster(session))

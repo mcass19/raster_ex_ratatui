@@ -133,3 +133,29 @@ turns =
 RasterBench.measure("apply/2, ten queued turns of that region as one list", 10, fn ->
   Raster.apply(both, turns)
 end)
+
+# The same panel on its side: a 1080x1920 framebuffer showing the app
+# turned by 90. Same grid, same payloads; the cost should be about the same.
+IO.puts("\nrotate: 90 (physical 1080x1920, logical 1920x1080)")
+turned = Raster.new(size: {1080, 1920}, format: XRGB8888, scale: 3, rotate: 90)
+
+RasterBench.measure("apply/2, full payload (cold cache)", 5, fn ->
+  Raster.apply(Raster.new(size: {1080, 1920}, format: XRGB8888, scale: 3, rotate: 90), full)
+end)
+
+{turned, _} = Raster.apply(turned, full)
+RasterBench.measure("apply/2, full payload (warm cache)", 5, fn -> Raster.apply(turned, full) end)
+RasterBench.measure("frame/1, full 1080x1920 buffer", 5, fn -> Raster.frame(turned) end)
+RasterBench.measure("apply/2, 50 changed cells", 20, fn -> Raster.apply(turned, diff) end)
+RasterBench.measure("apply/2, one full row (106 cells)", 20, fn -> Raster.apply(turned, line) end)
+
+{turned_both, _} =
+  Raster.apply(turned, %Diff{width: cols, height: rows, regions: [still, before]})
+
+RasterBench.measure("apply/2, 20x10 region beside a still 53x22", 10, fn ->
+  Raster.apply(turned_both, %Diff{width: cols, height: rows, regions: [still, after_turn]})
+end)
+
+RasterBench.measure("apply/2, 53x22-cell region (954x528 px)", 10, fn ->
+  Raster.apply(turned, %Diff{width: cols, height: rows, regions: [still]})
+end)

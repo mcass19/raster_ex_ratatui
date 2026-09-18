@@ -5,12 +5,13 @@ defmodule RasterExRatatui.RasterTest do
   import RasterExRatatui.Test.Frames
 
   alias ExRatatui.CellSession
-  alias ExRatatui.CellSession.{Cell, Diff, Snapshot}
+  alias ExRatatui.CellSession.{Cell, Diff, Region, Snapshot}
   alias ExRatatui.Layout.Rect
   alias ExRatatui.Widgets.Paragraph
   alias RasterExRatatui.Font.{Art, Default6x8}
   alias RasterExRatatui.{Grid, Patch, Raster}
   alias RasterExRatatui.PixelFormat.{Mono, RGB565, XRGB8888}
+  alias RasterExRatatui.Test.Rotation
 
   doctest Grid
   doctest Patch
@@ -502,16 +503,201 @@ defmodule RasterExRatatui.RasterTest do
     end
   end
 
+  describe "rotate:" do
+    @angles [90, 180, 270]
+
+    # Bold, reversed, colours, box glyphs, a braille glyph, a gray
+    # background (a checkerboard on Mono): a bit of everything, on a grid
+    # with a margin on both sides.
+    @text_cells [
+      %Cell{col: 0, row: 0, symbol: "A", fg: :red, bg: :blue},
+      %Cell{col: 1, row: 0, symbol: "B", modifiers: [:bold]},
+      %Cell{col: 2, row: 0, symbol: "C", modifiers: [:reversed]},
+      %Cell{col: 0, row: 1, symbol: "┌"},
+      %Cell{col: 1, row: 1, symbol: "─"},
+      %Cell{col: 2, row: 1, symbol: "┐"},
+      %Cell{col: 3, row: 2, symbol: "█", fg: {:rgb, 250, 10, 10}},
+      %Cell{col: 4, row: 3, symbol: "⠇", fg: :green, bg: {:rgb, 128, 128, 128}},
+      %Cell{col: 9, row: 4, symbol: "Z", fg: :yellow}
+    ]
+
+    # A gradient bitmap upscaled onto four cells, and a region that hangs
+    # off the grid on both sides, so clipping and sampling both show.
+    @regions [
+      %Region{
+        x: 1,
+        y: 1,
+        width: 2,
+        height: 2,
+        pixel_width: 2,
+        pixel_height: 2,
+        data: <<255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0>>
+      },
+      %Region{
+        x: 7,
+        y: 3,
+        width: 5,
+        height: 4,
+        pixel_width: 3,
+        pixel_height: 2,
+        data: <<10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180>>
+      }
+    ]
+
+    # The same app image (61×41 logical, a 10×5 grid with a one-pixel margin
+    # on the right and at the bottom) on a flat raster and on one turned by
+    # `angle`. Odd × odd, so the panel's checkerboard phase agrees with the
+    # app's whichever way it is turned (the anchoring test below uses an
+    # even panel to tell them apart).
+    defp pair(format, angle, logical \\ {61, 41}) do
+      {lw, lh} = logical
+      physical = if angle in [90, 270], do: {lh, lw}, else: logical
+      flat = Raster.new(size: logical, format: format)
+      turned = Raster.new(size: physical, format: format, rotate: angle)
+      {flat, turned}
+    end
+
+    # The flat frame, rotated by hand, and the turned raster's frame and patches.
+    defp turned_frames({flat, turned}, cells, regions) do
+      diff = full_diff(Raster.grid_size(flat), cells, regions)
+      {flat, _patches} = Raster.apply(flat, diff)
+      {turned, patches} = Raster.apply(turned, diff)
+      {lw, lh} = Raster.logical_size(turned)
+      bpp = Raster.bytes_per_pixel(turned)
+      expected = Rotation.rotate_frame(Raster.frame(flat), lw, lh, bpp, Raster.rotate(turned))
+      {expected, Raster.frame(turned), patches, turned}
+    end
+
+    defp blank_frame(%Raster{} = raster) do
+      {w, h} = Raster.size(raster)
+      :binary.copy(raster.blank, w * h)
+    end
+
+    defp ink(frame), do: frame |> :binary.bin_to_list() |> Enum.count(&(&1 == 0))
+
+    test "rejects anything but the four angles" do
+      for angle <- [45, -90, "90", nil] do
+        assert_raise ArgumentError, ~r/:rotate/, fn -> mono({24, 16}, rotate: angle) end
+      end
+    end
+
+    test "swaps the grid at 90 and 270, reports the logical size, and survives a resize" do
+      raster = mono({24, 16}, rotate: 90)
+      assert Raster.size(raster) == {24, 16}
+      assert Raster.logical_size(raster) == {16, 24}
+      assert Raster.grid_size(raster) == {2, 3}
+      assert Raster.margin(raster) == {4, 0}
+      assert Raster.rotate(raster) == 90
+
+      resized = Raster.resize(raster, {48, 32})
+      assert Raster.rotate(resized) == 90
+      assert Raster.logical_size(resized) == {32, 48}
+      assert Raster.grid_size(resized) == {5, 6}
+
+      assert Raster.grid_size(mono({24, 16}, rotate: 180)) == {4, 2}
+      assert Raster.grid_size(mono({24, 16}, rotate: 270)) == {2, 3}
+    end
+
+    for format <- [Mono, RGB565, XRGB8888], angle <- @angles do
+      test "cells at #{angle} on #{inspect(format)} equal the rotated flat frame, from frame/1 and from the patches" do
+        {expected, frame, patches, turned} =
+          unquote(format) |> pair(unquote(angle)) |> turned_frames(@text_cells, [])
+
+        assert frame == expected
+        assert blit(blank_frame(turned), turned, patches) == expected
+      end
+    end
+
+    for format <- [RGB565, XRGB8888], angle <- @angles do
+      test "regions at #{angle} on #{inspect(format)} equal the rotated flat frame" do
+        {expected, frame, patches, turned} =
+          unquote(format) |> pair(unquote(angle)) |> turned_frames(@text_cells, @regions)
+
+        assert frame == expected
+        assert blit(blank_frame(turned), turned, patches) == expected
+      end
+    end
+
+    for angle <- @angles do
+      test "Mono regions at #{angle}: the patches give the frame and the dither keeps its tone" do
+        {flat, turned} = pair(Mono, unquote(angle))
+        gray = region(1, 1, 4, 3, {128, 128, 128})
+        diff = full_diff(Raster.grid_size(flat), @text_cells, [gray])
+
+        {flat, _patches} = Raster.apply(flat, diff)
+        {turned, patches} = Raster.apply(turned, diff)
+        frame = Raster.frame(turned)
+
+        assert blit(blank_frame(turned), turned, patches) == frame
+        # 4×3 cells of 50% gray: the Bayer tiles land on other panel pixels,
+        # so only the tile edges can differ.
+        assert abs(ink(frame) - ink(Raster.frame(flat))) <= div(24 * 24, 20)
+      end
+    end
+
+    test "checkerboards and dither follow the panel's pixel grid, not the app's" do
+      # An even panel: at 90 the app's (x + y) parity and the panel's disagree.
+      turned = mono({24, 16}, rotate: 90)
+      gray = %Cell{symbol: " ", bg: {:rgb, 128, 128, 128}}
+      assert {_fg, {:checker, even, odd}} = Mono.cell_paints(gray, turned.config)
+
+      cells = for col <- 0..1, row <- 0..2, do: %{gray | col: col, row: row}
+      {turned, _patches} = Raster.apply(turned, full_diff({2, 3}, cells))
+      frame = Raster.frame(turned)
+
+      # The grid covers the panel's top 12 rows; the rest is the margin.
+      for x <- 0..23, y <- 0..11 do
+        expected = if rem(x + y, 2) == 0, do: even, else: odd
+        assert pixel(frame, turned, x, y) == expected, "pixel #{x},#{y}"
+      end
+
+      # A gray region dithers exactly as it would on a flat panel of the
+      # same physical size: the Bayer tile is the panel's.
+      region = region(0, 0, 2, 3, {128, 128, 128})
+
+      {turned, _patches} =
+        Raster.apply(mono({24, 16}, rotate: 90), full_diff({2, 3}, [], [region]))
+
+      flat = mono({24, 16})
+
+      {flat, _patches} =
+        Raster.apply(flat, full_diff({4, 2}, [], [region(0, 0, 4, 2, {128, 128, 128})]))
+
+      assert binary_part(Raster.frame(turned), 0, 24 * 12) ==
+               binary_part(Raster.frame(flat), 0, 24 * 12)
+    end
+
+    test "a real session's Viewport3D region lands turned with the cells" do
+      {flat, turned} = pair(XRGB8888, 90, {73, 66})
+      session = session(flat)
+      widgets = [cube(%Rect{x: 0, y: 1, width: 12, height: 6})]
+      diff = draw(session, widgets)
+
+      {flat, _patches} = Raster.apply(flat, diff)
+      {turned, patches} = Raster.apply(turned, diff)
+      frame = Raster.frame(turned)
+
+      # The bordered viewport's region is the 10×4 cells inside the border,
+      # (6, 16, 60, 32) in the app's pixels; turned by 90 it is a 32×60 rect.
+      assert Raster.size(turned) == {66, 73}
+      assert Enum.any?(patches, &match?(%Patch{x: 18, y: 6, width: 32, height: 60}, &1))
+      assert frame == Rotation.rotate_frame(Raster.frame(flat), 73, 66, 4, 90)
+      assert blit(blank_frame(turned), turned, patches) == frame
+    end
+  end
+
   describe "patches against frames" do
     property "writing apply/2's patches over the previous frame gives the next frame" do
       check all(
               format <- member_of([Mono, RGB565]),
               scale <- integer(1..2),
+              rotate <- member_of([0, 90, 180, 270]),
               steps <- list_of(diff_step(), min_length: 1, max_length: 8),
               max_runs: 150
             ) do
-        raster =
-          Raster.new(size: {5 * 6 * scale + 1, 3 * 8 * scale + 2}, format: format, scale: scale)
+        logical = {5 * 6 * scale + 1, 3 * 8 * scale + 2}
+        size = if rotate in [90, 270], do: {elem(logical, 1), elem(logical, 0)}, else: logical
+        raster = Raster.new(size: size, format: format, scale: scale, rotate: rotate)
 
         {raster, _} = Raster.apply(raster, full_diff({5, 3}, []))
 
