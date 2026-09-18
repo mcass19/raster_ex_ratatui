@@ -8,15 +8,14 @@ It is the example for the **surface process**: `RpiFramebuffer.Surface` is a `Ra
 
 ## What is on the panel
 
-`RpiFramebuffer.Dashboard` is an ordinary `ExRatatui.App` (reducer runtime) with three tabs. It knows nothing about pixels.
+`RpiFramebuffer.Dashboard` is an ordinary `ExRatatui.App` (reducer runtime) with two tabs. It knows nothing about pixels.
 
 | Tab | What to see |
 |-----|-------------|
 | **Showcase** | What a console cannot show: a lit, turning `Viewport3D` object and a colour photo as pixel regions at the panel's own resolution, next to BEAM sparklines and a gauge made of cells. `s` next object, `p` next photo, `space` pause. |
-| **System** | The device from `/proc` and `/sys`: load, a bar per core, memory, SoC temperature with history, uptime, and the addresses it answers on. |
 | **Input** | The keyboard arriving whole: a text input, the last key with its modifiers spelled out, the keys before it, and an echo pane (`enter` sends, `esc` clears). |
 
-`tab` and `shift+tab` walk the tabs, `f1` to `f3` jump, `ctrl+q` quits (so does `q` outside the Input tab). Quitting restarts the dashboard: the panel has nothing else to show.
+`tab` and `shift+tab` walk the tabs, `f1` and `f2` jump, `ctrl+q` quits (so does `q` outside the Input tab). Quitting restarts the dashboard: the panel has nothing else to show.
 
 Layouts are constraints only. Panes sit side by side on a landscape grid and stack on a portrait one, so the same app holds at 60×80 cells (the Touch Display 2 in its native portrait) and 106×45 (a 1080p monitor).
 
@@ -33,7 +32,7 @@ iex -S mix
 iex> RpiFramebuffer.run()
 ```
 
-In a terminal the 3D object and the photo fall back to what the terminal supports (half blocks, or Kitty/Sixel graphics), and the System tab shows the laptop. Start it from a real terminal: a backgrounded or piped `mix run` has no TTY to draw on.
+In a terminal the 3D object and the photo fall back to what the terminal supports (half blocks, or Kitty/Sixel graphics). Start it from a real terminal: a backgrounded or piped `mix run` has no TTY to draw on.
 
 ```sh
 mix test

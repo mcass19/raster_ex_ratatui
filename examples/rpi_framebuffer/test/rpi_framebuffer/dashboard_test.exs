@@ -12,7 +12,6 @@ defmodule RpiFramebuffer.DashboardTest do
   alias ExRatatui.Widgets.Tabs
   alias RpiFramebuffer.Dashboard
   alias RpiFramebuffer.Dashboard.Input
-  alias RpiFramebuffer.Dashboard.Monitor
   alias RpiFramebuffer.Dashboard.Showcase
 
   doctest Dashboard
@@ -24,12 +23,10 @@ defmodule RpiFramebuffer.DashboardTest do
 
   describe "init/1" do
     test "opens on the showcase and hands its options to every tab" do
-      assert {:ok, %{active: 0, tabs: tabs} = state} =
-               Dashboard.init(spin_ms: 500, root: "/nowhere")
+      assert {:ok, %{active: 0, tabs: tabs} = state} = Dashboard.init(spin_ms: 500)
 
       assert Dashboard.active(state) == Showcase
       assert %{spin_ms: 500} = tabs[Showcase]
-      assert %{root: "/nowhere"} = tabs[Monitor]
       assert %{count: 0} = tabs[Input]
     end
   end
@@ -37,28 +34,27 @@ defmodule RpiFramebuffer.DashboardTest do
   describe "switching tabs" do
     test "tab and back_tab walk the tabs and wrap", %{state: state} do
       assert {:noreply, %{active: 1} = state} = Dashboard.update({:event, key("tab")}, state)
-      assert {:noreply, %{active: 2} = state} = Dashboard.update({:event, key("tab")}, state)
       assert {:noreply, %{active: 0} = state} = Dashboard.update({:event, key("tab")}, state)
 
-      assert {:noreply, %{active: 2}} =
+      assert {:noreply, %{active: 1}} =
                Dashboard.update({:event, key("back_tab", ["shift"])}, state)
     end
 
     test "function keys jump", %{state: state} do
-      assert {:noreply, %{active: 2} = state} = Dashboard.update({:event, key("f3")}, state)
+      assert {:noreply, %{active: 1} = state} = Dashboard.update({:event, key("f2")}, state)
       assert Dashboard.active(state) == Input
-      assert {:noreply, %{active: 1}} = Dashboard.update({:event, key("f2")}, state)
+      assert {:noreply, %{active: 0}} = Dashboard.update({:event, key("f1")}, state)
     end
 
     test "only the tab on screen animates", %{state: state} do
-      assert [:showcase_sample, :showcase_spin, :system_sample] = ids(state)
-      assert [:system_sample] = ids(%{state | active: 1})
+      assert [:showcase_sample, :showcase_spin] = ids(state)
+      assert [] = ids(%{state | active: 1})
     end
   end
 
   describe "quitting" do
     test "ctrl+q quits anywhere", %{state: state} do
-      for active <- 0..2 do
+      for active <- 0..1 do
         assert {:stop, _state} =
                  Dashboard.update({:event, key("q", ["ctrl"])}, %{state | active: active})
       end
@@ -66,9 +62,8 @@ defmodule RpiFramebuffer.DashboardTest do
 
     test "q quits unless the tab uses it", %{state: state} do
       assert {:stop, _state} = Dashboard.update({:event, key("q")}, state)
-      assert {:stop, _state} = Dashboard.update({:event, key("q")}, %{state | active: 1})
 
-      assert {:noreply, typed} = Dashboard.update({:event, key("q")}, %{state | active: 2})
+      assert {:noreply, typed} = Dashboard.update({:event, key("q")}, %{state | active: 1})
       assert ExRatatui.text_input_get_value(typed.tabs[Input].field) == "q"
     end
   end
@@ -98,13 +93,10 @@ defmodule RpiFramebuffer.DashboardTest do
     end
 
     test "a tab updating off screen does not render", %{state: state} do
-      assert {:noreply, sampled, render?: false} =
-               Dashboard.update({:info, {:tab, Monitor, :sample}}, state)
+      assert {:noreply, turned, render?: false} =
+               Dashboard.update({:info, {:tab, Showcase, :spin}}, %{state | active: 1})
 
-      assert [_percent] = sampled.tabs[Monitor].cpu
-
-      assert {:noreply, _state} =
-               Dashboard.update({:info, {:tab, Monitor, :sample}}, %{state | active: 1})
+      assert turned.tabs[Showcase].angle > state.tabs[Showcase].angle
     end
 
     test "ignores unknown tabs and messages", %{state: state} do
@@ -122,7 +114,7 @@ defmodule RpiFramebuffer.DashboardTest do
     test "frames the active tab between the tab bar and its hints", %{state: state} do
       widgets = Dashboard.render(state, %Frame{width: 60, height: 80})
 
-      assert {%Tabs{titles: ["Showcase", "System", "Input"], selected: 0}, %Rect{y: 0, height: 3}} =
+      assert {%Tabs{titles: ["Showcase", "Input"], selected: 0}, %Rect{y: 0, height: 3}} =
                List.first(widgets)
 
       assert {%Paragraph{text: line}, %Rect{y: 79, height: 1}} = List.last(widgets)
@@ -135,8 +127,8 @@ defmodule RpiFramebuffer.DashboardTest do
     end
 
     test "selects the tab on screen", %{state: state} do
-      assert [{%Tabs{selected: 2}, _rect} | _] =
-               Dashboard.render(%{state | active: 2}, %Frame{width: 106, height: 45})
+      assert [{%Tabs{selected: 1}, _rect} | _] =
+               Dashboard.render(%{state | active: 1}, %Frame{width: 106, height: 45})
     end
   end
 
@@ -145,10 +137,10 @@ defmodule RpiFramebuffer.DashboardTest do
       {:ok, pid} = Dashboard.start_link(name: nil, test_mode: {60, 40})
       ref = Process.monitor(pid)
 
-      assert %{mode: :reducer, subscription_count: 3} = Runtime.snapshot(pid)
+      assert %{mode: :reducer, subscription_count: 2} = Runtime.snapshot(pid)
 
       :ok = Runtime.inject_event(pid, key("tab"))
-      assert %{subscription_count: 1} = Runtime.snapshot(pid)
+      assert %{subscription_count: 0} = Runtime.snapshot(pid)
 
       :ok = Runtime.inject_event(pid, key("q", ["ctrl"]))
       assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000

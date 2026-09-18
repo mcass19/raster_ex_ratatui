@@ -20,7 +20,7 @@ defmodule RpiFramebuffer.Surface do
     * `:console` — the framebuffer console to unbind, default `"vtcon1"`
     * `:keyboard` — whether to look for a keyboard, default `true`
     * `:spin_ms` — passed to the dashboard, see `RpiFramebuffer.Dashboard.Showcase`
-    * `:root` — filesystem root for `/sys`, `/dev`, and the dashboard's `/proc`, default `"/"` (tests point it at a fake tree)
+    * `:root` — filesystem root for `/sys` and `/dev`, default `"/"` (tests point it at a fake tree)
     * `:input` — the module that finds and reads input devices, default `InputEvent` (tests pass a stub)
   """
 
@@ -63,7 +63,7 @@ defmodule RpiFramebuffer.Surface do
         size: size,
         format: format,
         scale: scale,
-        app_opts: Keyword.take(opts, [:root, :spin_ms])
+        app_opts: Keyword.take(opts, [:spin_ms])
       ]
 
       state = %{

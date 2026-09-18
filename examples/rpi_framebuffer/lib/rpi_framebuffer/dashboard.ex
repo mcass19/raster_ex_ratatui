@@ -3,7 +3,7 @@ defmodule RpiFramebuffer.Dashboard do
   The app on the panel: a tab bar, the active tab, and a hint line.
 
       ╭ raster_ex_ratatui ───────────────────────────────╮
-      │ Showcase │ System │ Input                        │
+      │ Showcase │ Input                                 │
       ╰──────────────────────────────────────────────────╯
       ┌──────────────────────────────────────────────────┐
       │                  the active tab                  │
@@ -12,14 +12,14 @@ defmodule RpiFramebuffer.Dashboard do
 
   It is an ordinary `ExRatatui.App` on the reducer runtime and knows nothing about pixels: `RpiFramebuffer.Surface` runs it on the framebuffer, `RpiFramebuffer.run/1` in a terminal. Each tab is a `RpiFramebuffer.Dashboard.Tab`; the dashboard keeps their states, routes their timer messages back to them, and hands key events to the one on screen.
 
-  A tab that updates while off screen (the system monitor keeps sampling) does not cause a render.
+  A tab that updates while off screen (a timer message that still arrives) does not cause a render.
 
   ## Keys
 
   | Key                | Action                                                         |
   | ------------------ | -------------------------------------------------------------- |
   | `tab` / `back_tab` | Next / previous tab                                            |
-  | `f1`, `f2`, `f3`   | Jump to a tab                                                  |
+  | `f1`, `f2`         | Jump to a tab                                                  |
   | `ctrl+q`           | Quit                                                           |
   | `q`                | Quit, on tabs that do not use the key (the Input tab types it) |
 
@@ -27,7 +27,7 @@ defmodule RpiFramebuffer.Dashboard do
 
   ## Options
 
-  Every option is handed to every tab: see `RpiFramebuffer.Dashboard.Showcase` (`:spin_ms`) and `RpiFramebuffer.Dashboard.Monitor` (`:root`).
+  Every option is handed to every tab: see `RpiFramebuffer.Dashboard.Showcase` (`:spin_ms`).
   """
 
   use ExRatatui.App, runtime: :reducer
@@ -43,11 +43,10 @@ defmodule RpiFramebuffer.Dashboard do
   alias ExRatatui.Widgets.Paragraph
   alias ExRatatui.Widgets.Tabs
   alias RpiFramebuffer.Dashboard.Input
-  alias RpiFramebuffer.Dashboard.Monitor
   alias RpiFramebuffer.Dashboard.Showcase
 
-  @tabs [Showcase, Monitor, Input]
-  @jump %{"f1" => 0, "f2" => 1, "f3" => 2}
+  @tabs [Showcase, Input]
+  @jump %{"f1" => 0, "f2" => 1}
 
   @impl ExRatatui.App
   def init(opts) do
@@ -109,11 +108,11 @@ defmodule RpiFramebuffer.Dashboard do
 
   ## Examples
 
-      iex> RpiFramebuffer.Dashboard.turn(2, 1)
+      iex> RpiFramebuffer.Dashboard.turn(1, 1)
       0
 
       iex> RpiFramebuffer.Dashboard.turn(0, -1)
-      2
+      1
   """
   @spec turn(non_neg_integer(), integer()) :: non_neg_integer()
   def turn(index, step), do: Integer.mod(index + step, length(@tabs))
