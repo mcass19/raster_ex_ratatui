@@ -105,9 +105,29 @@ The kernel's framebuffer console draws on the same device, so boot messages, a l
 
 ## The keyboard
 
-`input_event` reads `/dev/input/eventN` and delivers `{:input_event, path, events}` to the process that started it; started in the surface's `init/1`, that is the surface. `grab: true` keeps the keystrokes from also reaching the kernel console. `RasterExRatatui.Input.Evdev` keeps track of shift, ctrl, alt, super, and caps lock, and produces the same `%ExRatatui.Event.Key{}` structs a terminal would, so the app's key handling is unchanged. Layouts other than US are a `layout:` map away.
+`RasterExRatatui.Input.Devices` owns the keyboard: it finds the first `/dev/input/eventN` that reports letter keys (or reads the path it is given), starts an [`input_event`](https://hex.pm/packages/input_event) reader on it with `grab: true` so keystrokes do not also reach the kernel console, translates what the reader delivers through `RasterExRatatui.Input.Evdev` into the same `%ExRatatui.Event.Key{}` structs a terminal would send (shift, ctrl, alt, super, and caps lock tracked; other layouts a `layout:` map away), and keeps looking, every two seconds, whenever there is no keyboard: at boot before one is plugged in, and again after one is unplugged, starting from a fresh translator so modifiers held on the old keyboard do not stick. It is process-less: the surface builds it in `init/1` with `Devices.new/1` + `Devices.start/1`, hands it every message in `handle_info/2` and returns the `{:events, keys, state}` it gets back, and calls `Devices.stop/1` in `terminate/2` so no reader outlives the surface holding the grab.
 
-A keyboard plugged in after boot gets a new event device. The `rpi_framebuffer` example covers it inside the surface: the reader is linked, the surface looks for a keyboard again when the reader exits and every two seconds while there is none, and it starts from a fresh `Evdev` state so modifiers held on the old keyboard do not stick. Two things to know about `input_event` there: `InputEvent.enumerate/0` starts and stops a short-lived reader per device from the calling process, so a surface, which traps exits, sees their `:normal` exits in `handle_info/2` and must ignore them; and a reader that is only linked outlives a surface that stops normally, keeping its grab, so the surface stops it in `terminate/2` as the sketch above does.
+```elixir
+@impl true
+def init(opts) do
+  {:ok, devices} = RasterExRatatui.Input.Devices.start(RasterExRatatui.Input.Devices.new(keyboard: true))
+  {:ok, [], %{fb: open_framebuffer(opts), devices: devices}}
+end
+
+@impl true
+def handle_info(msg, state) do
+  case RasterExRatatui.Input.Devices.handle_info(msg, state.devices) do
+    {:events, keys, devices} -> {:events, keys, %{state | devices: devices}}
+    {:noreply, devices} -> {:noreply, %{state | devices: devices}}
+    :unknown -> {:noreply, state}
+  end
+end
+
+@impl true
+def terminate(_reason, state), do: RasterExRatatui.Input.Devices.stop(state.devices)
+```
+
+`input_event` is a C port that only builds on Linux, so it is the consumer's dependency, not this library's: add `{:input_event, "~> 1.4"}` to the project. `Devices.start/1` returns `{:error, :input_event_missing}` when the module is not there, which a host build can treat as "no input". The `:input` option swaps the module for a stub in tests. One thing to know about `input_event`: `InputEvent.enumerate/0` starts and stops a short-lived reader per device from the calling process, so a surface, which traps exits, sees their `:normal` exits in `handle_info/2`; `Devices.handle_info/2` answers `:unknown` to those and the surface ignores them.
 
 ## Performance
 

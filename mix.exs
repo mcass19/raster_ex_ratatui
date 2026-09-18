@@ -134,6 +134,7 @@ defmodule RasterExRatatui.MixProject do
         ],
         "Device helpers": [
           RasterExRatatui.Framebuffer,
+          RasterExRatatui.Input.Devices,
           RasterExRatatui.Input.Evdev
         ],
         Internals: [
