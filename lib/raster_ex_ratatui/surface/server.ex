@@ -2,24 +2,24 @@ defmodule RasterExRatatui.Surface.Server do
   @moduledoc false
 
   # The process behind `use RasterExRatatui.Surface`. See that moduledoc
-  # for the lifecycle; this module only implements it.
+  # for the lifecycle; this module only adds what a process adds to a
+  # `RasterExRatatui.Session`: the consumer's callbacks, `min_interval`,
+  # the push, telemetry, and the exit policy.
   #
   # Renders are folded, not queued. When a diff arrives, every diff already
-  # waiting in the mailbox is taken with it, and the whole batch goes
-  # through one `Raster.apply/2` and one push, right away. So when the app
-  # renders faster than the surface rasterises or the panel writes, the
-  # surface shows fewer, later frames instead of every frame later and
-  # later, and a key event never waits behind stale renders. `min_interval`
-  # holds the batch back on a timer instead; nothing is rasterised until
-  # the push is due.
+  # waiting in the mailbox is taken with it (`Session.drain/2`), and the
+  # whole batch goes through one `Session.render/2` and one push, right
+  # away. So when the app renders faster than the surface rasterises or
+  # the panel writes, the surface shows fewer, later frames instead of
+  # every frame later and later, and a key event never waits behind stale
+  # renders. `min_interval` holds the batch back on a timer instead;
+  # nothing is rasterised until the push is due.
 
   use GenServer
 
   require Logger
 
-  alias ExRatatui.CellSession
-  alias ExRatatui.CellSession.Diff
-  alias RasterExRatatui.{Raster, Telemetry}
+  alias RasterExRatatui.{Raster, Session, Telemetry}
 
   @raster_keys [:size, :font, :format, :scale, :format_opts]
 
@@ -27,13 +27,10 @@ defmodule RasterExRatatui.Surface.Server do
     :module,
     :state,
     :app,
-    :app_opts,
-    :raster,
     :session,
-    :server,
+    :session_opts,
     :push_mode,
     :min_interval,
-    :shutdown_timeout,
     :on_app_exit,
     timer: nil,
     last_push: nil,
@@ -82,105 +79,81 @@ defmodule RasterExRatatui.Surface.Server do
     )
 
     raster = opts |> Keyword.take(@raster_keys) |> Raster.new()
-    session = new_session(raster)
 
-    surface_state = %__MODULE__{
-      module: module,
-      state: state,
+    session_opts = [
       app: app,
       app_opts: Keyword.get(opts, :app_opts, []),
-      raster: raster,
-      session: session,
-      push_mode: push_mode,
-      min_interval: min_interval,
-      shutdown_timeout: shutdown_timeout,
-      on_app_exit: on_app_exit
-    }
+      keep_frame: push_mode == :frame,
+      shutdown_timeout: shutdown_timeout
+    ]
 
-    case start_server(surface_state) do
-      {:ok, surface_state} ->
+    case Session.start(raster, session_opts) do
+      {:ok, session} ->
+        s = %__MODULE__{
+          module: module,
+          state: state,
+          app: app,
+          session: session,
+          session_opts: session_opts,
+          push_mode: push_mode,
+          min_interval: min_interval,
+          on_app_exit: on_app_exit
+        }
+
         start_meta = %{size: Raster.size(raster), grid_size: Raster.grid_size(raster)}
-        Telemetry.execute([:surface, :start], %{}, Map.merge(meta(surface_state), start_meta))
+        Telemetry.execute([:surface, :start], %{}, Map.merge(meta(s), start_meta))
 
-        {:ok, surface_state}
+        {:ok, s}
 
       {:error, reason} ->
-        CellSession.close(session)
         {:stop, reason}
     end
   end
 
-  defp new_session(%Raster{} = raster) do
-    {cols, rows} = Raster.grid_size(raster)
-    CellSession.new(cols, rows, font_size: Raster.font_size(raster))
-  end
-
-  # Starts the app server on the surface's session, linked. Its `mount/1`
-  # sees `surface:` in its options: the panel as the raster knows it.
-  defp start_server(%__MODULE__{} = s) do
-    surface = self()
-
-    writer = fn diff ->
-      send(surface, {__MODULE__, :diff, diff})
-      :ok
-    end
-
-    server_opts =
-      [mod: s.app, name: nil, transport: {:cell_session, s.session, writer}] ++
-        Keyword.put(s.app_opts, :surface, surface_info(s.raster))
-
-    case ExRatatui.Transport.start_server(server_opts) do
-      {:ok, server} -> {:ok, %{s | server: server}}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp surface_info(%Raster{} = raster) do
-    %{
-      size: Raster.size(raster),
-      cell_size: Raster.font_size(raster),
-      grid_size: Raster.grid_size(raster),
-      format: raster.format,
-      scale: raster.scale,
-      rotate: 0
-    }
-  end
-
   @impl true
-  def handle_info({__MODULE__, :diff, %Diff{} = diff}, %__MODULE__{} = s) do
-    diffs = Enum.filter([diff | drain()], &current?(&1, s))
-    {:noreply, maybe_flush(%{s | pending: Enum.reverse(diffs, s.pending)})}
-  end
-
   def handle_info({__MODULE__, :flush}, %__MODULE__{} = s) do
     {:noreply, flush(%{s | timer: nil})}
+  end
+
+  def handle_info(msg, %__MODULE__{} = s) do
+    case Session.drain(s.session, msg) do
+      {:diffs, diffs, session} ->
+        s = %{s | session: session, pending: Enum.reverse(diffs, s.pending)}
+        {:noreply, maybe_flush(s)}
+
+      {:exit, reason, session} ->
+        app_exit(%{s | session: session}, reason)
+
+      :unknown ->
+        consumer_info(msg, s)
+    end
   end
 
   # The app is gone, and its server closed the cell session on the way out.
   # With `on_app_exit: :restart` a new app starts on a fresh session over
   # the same raster; its first render is a full payload, so the panel is
   # repainted. Whatever the old app had left pending is dropped.
-  def handle_info({:EXIT, server, reason}, %__MODULE__{server: server, on_app_exit: :restart} = s) do
-    app_exit(s, reason, :restart)
+  defp app_exit(%__MODULE__{on_app_exit: :restart} = s, reason) do
+    Telemetry.execute([:app, :exit], %{}, Map.merge(meta(s), %{reason: reason, action: :restart}))
 
     Logger.info(
       "#{inspect(s.module)}: #{inspect(s.app)} exited with #{inspect(reason)}, starting it again"
     )
 
-    s = %{s | server: nil, session: new_session(s.raster), pending: []}
+    :ok = Session.stop(s.session)
 
-    case start_server(s) do
-      {:ok, s} -> {:noreply, s}
+    case Session.start(Session.raster(s.session), s.session_opts) do
+      {:ok, session} -> {:noreply, %{s | session: session, pending: []}}
       {:error, reason} -> {:stop, reason, s}
     end
   end
 
-  def handle_info({:EXIT, server, reason}, %__MODULE__{server: server} = s) do
-    app_exit(s, reason, :stop)
-    {:stop, reason, %{s | server: nil}}
+  defp app_exit(%__MODULE__{} = s, reason) do
+    Telemetry.execute([:app, :exit], %{}, Map.merge(meta(s), %{reason: reason, action: :stop}))
+    {:stop, reason, s}
   end
 
-  def handle_info(msg, %__MODULE__{module: module} = s) do
+  defp consumer_info(msg, %__MODULE__{module: module} = s) do
     case module.handle_info(msg, s.state) do
       {:noreply, state} ->
         {:noreply, %{s | state: state}}
@@ -199,68 +172,25 @@ defmodule RasterExRatatui.Surface.Server do
 
   @impl true
   def handle_call({:resize, size}, _from, %__MODULE__{} = s) do
-    raster = Raster.resize(s.raster, size)
-    {cols, rows} = Raster.grid_size(raster)
-    :ok = CellSession.resize(s.session, cols, rows)
-    send(s.server, {:ex_ratatui_resize, cols, rows})
-    {:reply, {cols, rows}, %{s | raster: raster, pending: []}}
+    session = Session.resize(s.session, size)
+    {:reply, Session.grid_size(session), %{s | session: session, pending: []}}
   end
 
-  def handle_call(:server, _from, %__MODULE__{} = s), do: {:reply, s.server, s}
-  def handle_call(:raster, _from, %__MODULE__{} = s), do: {:reply, s.raster, s}
+  def handle_call(:server, _from, %__MODULE__{} = s), do: {:reply, Session.server(s.session), s}
+  def handle_call(:raster, _from, %__MODULE__{} = s), do: {:reply, Session.raster(s.session), s}
 
   @impl true
   def terminate(reason, %__MODULE__{} = s) do
-    stop_server(s.server, s.shutdown_timeout)
+    :ok = Session.stop(s.session)
 
     Telemetry.execute([:surface, :stop], %{}, Map.put(meta(s), :reason, reason))
     s.module.terminate(reason, s.state)
-    CellSession.close(s.session)
-  end
-
-  defp stop_server(nil, _timeout), do: :ok
-
-  # The server is linked and we trap exits, so its exit arrives as a message.
-  # Its terminate/2 closes the session and runs the app's terminate/2; if that
-  # hangs, the server is killed so the consumer's terminate/2 still runs
-  # within the supervisor's shutdown budget.
-  defp stop_server(server, timeout) do
-    Process.exit(server, :shutdown)
-
-    receive do
-      {:EXIT, ^server, _reason} -> :ok
-    after
-      timeout ->
-        Process.exit(server, :kill)
-
-        receive do
-          {:EXIT, ^server, _reason} -> :ok
-        end
-    end
-  end
-
-  defp app_exit(%__MODULE__{} = s, reason, action) do
-    Telemetry.execute([:app, :exit], %{}, Map.merge(meta(s), %{reason: reason, action: action}))
   end
 
   defp forward(%__MODULE__{} = s, event) do
-    send(s.server, {:ex_ratatui_event, event})
+    :ok = Session.send_event(s.session, event)
     Telemetry.execute([:input, :forward], %{}, Map.put(meta(s), :event, event))
   end
-
-  # Every diff already in the mailbox, oldest first.
-  defp drain do
-    receive do
-      {__MODULE__, :diff, %Diff{} = diff} -> [diff | drain()]
-    after
-      0 -> []
-    end
-  end
-
-  # A diff rendered before a resize arrives with the old dimensions; the
-  # next render repaints the new grid in full, so it is dropped.
-  defp current?(%Diff{width: w, height: h}, %__MODULE__{raster: %Raster{grid_size: size}}),
-    do: {w, h} == size
 
   # Pushes as soon as the interval since the last push allows; otherwise a
   # timer, at most one, flushes what has gathered by then.
@@ -287,10 +217,11 @@ defmodule RasterExRatatui.Surface.Server do
   defp flush(%__MODULE__{} = s) do
     diffs = Enum.reverse(s.pending)
 
-    {raster, patches} =
+    {patches, session} =
       Telemetry.span([:frame, :raster], meta(s), fn ->
-        {raster, patches} = Raster.apply(s.raster, diffs)
+        {patches, session} = Session.render(s.session, diffs)
 
+        # Only diffs get here: `Session.drain/2` admits nothing else.
         stop = %{
           diffs: length(diffs),
           cells: diffs |> Enum.map(&length(&1.ops)) |> Enum.sum(),
@@ -298,21 +229,15 @@ defmodule RasterExRatatui.Surface.Server do
           patches: length(patches)
         }
 
-        {{raster, patches}, stop}
+        {{patches, session}, stop}
       end)
 
-    s = %{s | raster: raster, pending: []}
+    s = %{s | session: session, pending: []}
 
     case {patches, s.push_mode} do
-      {[], _mode} ->
-        s
-
-      {patches, :patches} ->
-        do_push(s, patches)
-
-      {_patches, :frame} ->
-        {raster, frame} = Raster.render_frame(s.raster)
-        do_push(%{s | raster: raster}, {:frame, frame})
+      {[], _mode} -> s
+      {patches, :patches} -> do_push(s, patches)
+      {_patches, :frame} -> do_push(s, {:frame, Session.frame(session)})
     end
   end
 

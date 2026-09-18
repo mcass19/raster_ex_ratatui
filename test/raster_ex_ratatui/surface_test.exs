@@ -184,11 +184,11 @@ defmodule RasterExRatatui.SurfaceTest do
       assert blit_all(before, pushes, 240, 1) == frame(surface)
     end
 
-    test "a diff with stale dimensions is dropped, and a flush with nothing pending is a no-op" do
+    test "a render for another session and a flush with nothing pending are ignored" do
       surface = start_surface()
-      stale = %Diff{width: 3, height: 3, ops: [%Cell{symbol: "x"}]}
+      stray = %Diff{width: 40, height: 20, ops: [%Cell{symbol: "x"}]}
 
-      send(surface, {RasterExRatatui.Surface.Server, :diff, stale})
+      send(surface, {RasterExRatatui.Session, make_ref(), stray})
       send(surface, {RasterExRatatui.Surface.Server, :flush})
 
       refute_receive {:pushed, _}, 100

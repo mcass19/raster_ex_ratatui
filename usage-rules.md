@@ -9,7 +9,8 @@ It is **not** a terminal emulator, a font renderer, or a display driver, and app
 | Use | When |
 |-----|------|
 | `use RasterExRatatui.Surface` | The default. A supervised process owns the app, rasterises, and calls `push/2` |
-| `RasterExRatatui.Raster` directly | The consumer already owns a process and a device loop |
+| `RasterExRatatui.Session` | The consumer already owns a process in charge of the panel: the same app server, raster, and folding, driven from that process's mailbox |
+| `RasterExRatatui.Raster` directly | Rasterising payloads that come from somewhere else (a headless `CellSession`, a test) |
 
 ## Surfaces
 
@@ -39,6 +40,23 @@ end
 - `min_interval:` (ms) throttles pushes for slow panels. The surface never builds a backlog: every render waiting when it gets to work is folded into one `Raster.apply/2` call (it takes a list) and one push, so slow panels or big regions show fewer frames, never later ones. `[:raster_ex_ratatui, :frame, :raster]` reports `:diffs` per batch.
 - The generated child spec is `restart: :transient`: an app that quits with `{:stop, state}` stays stopped, a crash restarts. A kiosk that must always come back uses `on_app_exit: :restart`.
 - `shutdown_timeout:` (default 4000 ms) bounds how long the surface waits for the app server to stop; keep it below the supervisor's shutdown so the consumer's `terminate/2` runs.
+
+## Sessions
+
+```elixir
+Process.flag(:trap_exit, true)
+raster = RasterExRatatui.Raster.new(size: {400, 300}, format: RasterExRatatui.PixelFormat.Mono)
+{:ok, session} = RasterExRatatui.Session.start(raster, app: MyDevice.App, keep_frame: true)
+{:render, _patches, session} = RasterExRatatui.Session.await(session)
+frame = RasterExRatatui.Session.frame(session)
+```
+
+- **Trap exits before `start/2`**: the app server is linked to the caller. Its exit then reaches `handle/2` as `{:exit, reason, session}`; without trapping it takes the caller down.
+- Pass **every** message the process receives to `handle/2`; it returns `{:render, patches, session}`, `{:exit, reason, session}`, or `:unknown`. Keep the returned session: it holds the folded raster.
+- `handle/2` already drains every render of the session waiting in the mailbox and folds them into one call; do not build a queue on top of it. Patches may be empty when a render changed nothing.
+- `keep_frame: true` keeps `frame/1` current at no cost per call; without it `frame/1` renders the raster.
+- After `{:exit, _, _}` the cell session is closed and `send_event/2` is a no-op. To bring the app back, `start/2` again on `raster(session)`; the first render repaints everything. `stop/1` is safe either way.
+- `stop/1` unlinks, stops the app (killing it after `shutdown_timeout:`), and closes the cell session; call it from `terminate/2`.
 
 ## Raster
 
@@ -71,7 +89,7 @@ frame = RasterExRatatui.Raster.frame(raster)
 
 - `RasterExRatatui.Framebuffer.open(name)` takes the device name (`"fb0"`), not a path. `write/2` accepts patches or `{:frame, binary}` and handles stride.
 - `RasterExRatatui.Input.Evdev` is pure: keep the returned keyboard struct between calls, since it tracks held modifiers and caps lock. The library does not depend on `input_event`; the consumer does.
-- A complete framebuffer surface (geometry, format and scale from sysfs, a hot-pluggable evdev keyboard, host tests against a fake sysfs) is the [`rpi_framebuffer`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/rpi_framebuffer) example; start from it rather than from scratch. A device that already owns its display from one process uses the pure core instead, as in the [`e_ink`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/e_ink) example.
+- A complete framebuffer surface (geometry, format and scale from sysfs, a hot-pluggable evdev keyboard, host tests against a fake sysfs) is the [`rpi_framebuffer`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/rpi_framebuffer) example; start from it rather than from scratch. A device that already owns its display from one process uses `RasterExRatatui.Session` from that process instead, the shape of the [`e_ink`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/e_ink) example.
 
 ## Testing
 

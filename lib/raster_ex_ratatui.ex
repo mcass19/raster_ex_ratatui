@@ -6,7 +6,10 @@ defmodule RasterExRatatui do
 
       ┌──────────────────────────────────────────────────────────────┐
       │ Surface      use RasterExRatatui.Surface                     │
-      │              owns the app server, folds diffs, calls push/2  │
+      │              a process that owns a Session and calls push/2  │
+      ├──────────────────────────────────────────────────────────────┤
+      │ Session      app server + cell session + raster, no process  │
+      │              handle/2 folds renders into patches             │
       ├──────────────────────────────────────────────────────────────┤
       │ Raster       Grid (cells + regions) → [Patch] | full frame   │
       │              Font × Palette × PixelFormat × scale            │
@@ -18,7 +21,8 @@ defmodule RasterExRatatui do
   ## Where to start
 
     * `RasterExRatatui.Surface` — the contract a device implements: panel geometry in `init/1`, pixels out in `push/2`, input in through `send_event/2`. Most consumers only write this module.
-    * `RasterExRatatui.Raster` — the pure rasteriser underneath, for consumers that already own a process and a device loop.
+    * `RasterExRatatui.Session` — the same app-on-a-raster without the process, for consumers that already own one: start it there, fold its messages with `handle/2`, write the patches.
+    * `RasterExRatatui.Raster` — the pure rasteriser underneath: payloads in, patches or a frame out.
     * `RasterExRatatui.Font`, `RasterExRatatui.PixelFormat` — the two behaviours that make the output fit a panel: glyph bitmaps and pixel packing.
     * `RasterExRatatui.Framebuffer`, `RasterExRatatui.Input.Evdev` — optional helpers for Linux framebuffers and evdev keyboards.
     * `RasterExRatatui.Telemetry` — the events the surface emits.

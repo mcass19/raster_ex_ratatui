@@ -30,7 +30,7 @@ defmodule RasterExRatatui.Surface do
 
   1. `start_link/1` merges its options over the `use` options and calls `c:init/1` with the result.
   2. `c:init/1` returns the consumer's state and a keyword list of options it could only know at runtime (typically `:size`, read from the device); those win over everything else.
-  3. The process builds a `RasterExRatatui.Raster`, creates an `ExRatatui.CellSession` of the raster's grid with the raster's `font_size:`, and starts the app server on it, linked.
+  3. The process builds a `RasterExRatatui.Raster` and starts a `RasterExRatatui.Session` on it, which creates an `ExRatatui.CellSession` of the raster's grid with the raster's `font_size:` and starts the app server on it, linked.
   4. Every render of the app arrives as a cell diff; the raster turns it into patches and `c:push/2` writes them.
   5. When the app server exits, `:on_app_exit` decides. With `:stop`, the default, the surface exits with the same reason; the generated child spec is `restart: :transient`, like `ExRatatui.App`'s, so a crash restarts the pair and an app that quits with `{:stop, state}` stays stopped. With `:restart`, the surface keeps its raster, opens a fresh cell session, and starts the app again; the new app's first render repaints the panel. When the surface stops, it stops the app server first.
 

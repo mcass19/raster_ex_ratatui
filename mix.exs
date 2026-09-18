@@ -114,6 +114,7 @@ defmodule RasterExRatatui.MixProject do
         ],
         Core: [
           RasterExRatatui,
+          RasterExRatatui.Session,
           RasterExRatatui.Raster,
           RasterExRatatui.Patch,
           RasterExRatatui.Grid,

@@ -2,7 +2,7 @@
 
 A surface is the piece that puts an ExRatatui app on one particular display. It knows three things about the panel: how big it is, how its pixels are packed, and how bytes reach it. Everything between the app and those bytes (starting the app, folding cell diffs, rasterising glyphs and pixel regions, forwarding input) is done by `RasterExRatatui.Surface`.
 
-This guide builds a surface from scratch, then looks at a consumer that uses the pure core instead: a 1-bit e-ink name badge.
+This guide builds a surface from scratch, then shows the same machinery driven from a process the consumer already owns (`RasterExRatatui.Session`), with a 1-bit e-ink name badge as the worked example.
 
 ## The data flow
 
@@ -116,6 +116,46 @@ test "the dashboard shows the title" do
 end
 ```
 
+## Own process: Session
+
+Some devices already have a process in charge of the panel: a screen manager that navigates between apps, a driver loop that owns the bus. A second process whose `push/2` would only message the first is in the way there, and so is a surface that exits when its app does. `RasterExRatatui.Session` is the surface without the process: the app server, the cell session, and the raster, started from the caller and driven by the caller's mailbox.
+
+```elixir
+defmodule Kiosk.Screen do
+  use GenServer
+
+  alias RasterExRatatui.{Raster, Session}
+
+  def init(app) do
+    Process.flag(:trap_exit, true)
+    raster = Raster.new(size: {400, 300}, format: RasterExRatatui.PixelFormat.Mono)
+    {:ok, session} = Session.start(raster, app: app, keep_frame: true)
+    {:ok, session}
+  end
+
+  def handle_info(msg, session) do
+    case Session.handle(session, msg) do
+      {:render, _patches, session} ->
+        Kiosk.Panel.show(Session.frame(session))
+        {:noreply, session}
+
+      {:exit, reason, session} ->
+        Kiosk.Panel.show(crash_frame(reason))
+        {:noreply, session}
+
+      :unknown ->
+        {:noreply, session}
+    end
+  end
+
+  def terminate(_reason, session), do: Session.stop(session)
+end
+```
+
+`Session.start/2` links the app server to the caller, which therefore traps exits; the app's exit then arrives as a message that `handle/2` turns into `{:exit, reason, session}`, and the caller decides what the panel shows. Every render of the app arrives as a `{RasterExRatatui.Session, ref, diff}` message; `handle/2` folds it, and every render of the session still waiting behind it, into the raster in one go and returns the patches, so a slow panel shows fewer, later frames and never queues up. With `keep_frame: true` the session also keeps a full frame current for panels that only take whole frames; `Session.frame/1` returns it. `Session.await/2` waits for the first render before the panel shows anything, `Session.send_event/2` forwards input, `Session.resize/2` changes the panel size, and `Session.stop/1` stops the app and closes the cell session. A consumer that wants the app back after it exits starts a new session on the same raster: the new app's first render repaints everything. The app receives the same `surface:` option a surface gives it.
+
+`handle/2` splits in two for a consumer that gathers renders and rasterises on its own schedule: `Session.drain/2` classifies the message and gathers the waiting renders, `Session.render/2` folds a list of them.
+
 ## Worked example: an e-ink name badge
 
-The [Goatmire name badge](https://github.com/mcass19/name_badge/pull/3), a 400×300 1-bit e-ink panel on Nerves (walked through in the [`e_ink`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/e_ink) example), already owns a screen process that navigates between apps, dedupes refreshes, and shows a crash frame, so it skips the surface process and uses the pure core. It creates the session from `Raster.grid_size/1` and `Raster.font_size/1` of a 400×300 `Mono` raster, starts the app server linked with a writer that sends every diff to the screen, and keeps a gray8 frame that it updates with `Raster.apply/2` and `RasterExRatatui.Patch.blit/4`, draining queued diffs first so each e-ink refresh shows the latest frame. Two GPIO buttons become `%ExRatatui.Event.Key{}` events, and an app crash draws a crash frame through the same raster instead of taking the screen down.
+The [Goatmire name badge](https://github.com/mcass19/name_badge/pull/3), a 400×300 1-bit e-ink panel on Nerves (walked through in the [`e_ink`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/e_ink) example), already owns a screen process that navigates between apps, dedupes refreshes, and shows a crash frame, so it runs its ExRatatui apps from that process rather than under a surface. Its screen is the shape above: a 400×300 `Mono` session with `keep_frame: true`, the frame handed to the display as a dithered image after each `{:render, …}`, a crash frame drawn through the same raster on `{:exit, …}` instead of a dead screen, two GPIO buttons turned into `%ExRatatui.Event.Key{}` events with `Session.send_event/2`, and `Session.await/2` for the first frame so the panel never shows an empty screen. (The badge fork on hex `0.1` does the same by hand with `Raster.apply/2` and `RasterExRatatui.Patch.blit/4`; `Session` packages that loop.)

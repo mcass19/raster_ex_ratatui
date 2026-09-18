@@ -61,7 +61,7 @@ The app needs no change: it is a plain `use ExRatatui.App` (or `ExRatatui.run/2`
 3. **Supervise it and wire input.** Add `MyDevice.Surface` to the supervision tree and the app is on the display. Whatever reads the hardware (a keyboard, GPIO buttons) turns its events into `ExRatatui.Event` structs and hands them over with `RasterExRatatui.Surface.send_event/2`; `RasterExRatatui.Input.Evdev` does the translation for evdev keyboards.
 4. **Test on the host.** A surface whose `push/2` sends patches to the test process drives the real app without a device, and `RasterExRatatui.Raster.frame/1` shows exactly what the panel would.
 
-[Building a Surface](guides/surfaces.md) walks through each step, including panels that only take whole frames, slow refreshes, crashes, and resizing. [Linux Framebuffers](guides/framebuffer.md) covers `/dev/fb0`, keeping the kernel console off the display, and keyboards. A device already driven from its own process can skip the surface and fold diffs with `RasterExRatatui.Raster` directly.
+[Building a Surface](guides/surfaces.md) walks through each step, including panels that only take whole frames, slow refreshes, crashes, and resizing. [Linux Framebuffers](guides/framebuffer.md) covers `/dev/fb0`, keeping the kernel console off the display, and keyboards. A device already driven from its own process starts a `RasterExRatatui.Session` there instead: the same app server, raster, and folding of renders, with no second process.
 
 ## Examples
 
