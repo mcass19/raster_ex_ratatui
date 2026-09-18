@@ -720,22 +720,52 @@ defmodule RasterExRatatui.RasterTest do
       end
     end
 
-    test "a real session's Viewport3D region lands turned with the cells" do
-      {flat, turned} = pair(XRGB8888, 90, {73, 66})
-      session = session(flat)
-      widgets = [cube(%Rect{x: 0, y: 1, width: 12, height: 6})]
-      diff = draw(session, widgets)
+    for angle <- @angles do
+      test "a real session's Viewport3D region (a bitmap at panel size) lands turned at #{angle}" do
+        {flat, turned} = pair(XRGB8888, unquote(angle), {73, 66})
+        session = session(flat)
+        widgets = [cube(%Rect{x: 0, y: 1, width: 12, height: 6})]
+        diff = draw(session, widgets)
 
-      {flat, _patches} = Raster.apply(flat, diff)
-      {turned, patches} = Raster.apply(turned, diff)
-      frame = Raster.frame(turned)
+        {flat, _patches} = Raster.apply(flat, diff)
+        {turned, patches} = Raster.apply(turned, diff)
+        frame = Raster.frame(turned)
 
-      # The bordered viewport's region is the 10×4 cells inside the border,
-      # (6, 16, 60, 32) in the app's pixels; turned by 90 it is a 32×60 rect.
-      assert Raster.size(turned) == {66, 73}
-      assert Enum.any?(patches, &match?(%Patch{x: 18, y: 6, width: 32, height: 60}, &1))
-      assert frame == Rotation.rotate_frame(Raster.frame(flat), 73, 66, 4, 90)
-      assert blit(blank_frame(turned), turned, patches) == frame
+        # The bordered viewport's region is the 10×4 cells inside the border,
+        # (6, 16, 60, 32) in the app's pixels: a 32×60 rect at 90 and 270.
+        assert Raster.size(turned) == if(unquote(angle) == 180, do: {73, 66}, else: {66, 73})
+
+        {x, y, w, h} =
+          case unquote(angle) do
+            90 -> {18, 6, 32, 60}
+            180 -> {7, 18, 60, 32}
+            270 -> {16, 7, 32, 60}
+          end
+
+        assert Enum.any?(patches, &match?(%Patch{x: ^x, y: ^y, width: ^w, height: ^h}, &1))
+        assert frame == Rotation.rotate_frame(Raster.frame(flat), 73, 66, 4, unquote(angle))
+        assert blit(blank_frame(turned), turned, patches) == frame
+      end
+    end
+
+    test "a bitmap at panel size clipped by the grid edge lands turned too" do
+      # 2×2 cells of 12×16 pixels hanging one cell off the grid on both sides.
+      {flat, turned} = pair(RGB565, 270, {61, 41})
+      data = for y <- 0..15, x <- 0..11, into: <<>>, do: <<x * 20, y * 15, 128>>
+
+      region = %Region{
+        x: 9,
+        y: 4,
+        width: 2,
+        height: 2,
+        pixel_width: 12,
+        pixel_height: 16,
+        data: data
+      }
+
+      {expected, frame, patches, turned} = turned_frames({flat, turned}, @text_cells, [region])
+      assert frame == expected
+      assert blit(blank_frame(turned), turned, patches) == expected
     end
   end
 

@@ -17,7 +17,7 @@ defmodule RasterExRatatui.Input.DevicesTest do
     :ok
   end
 
-  defp new(opts \\ []), do: Devices.new(Keyword.merge([input: Input, retry_ms: 20], opts))
+  defp new(opts), do: Devices.new(Keyword.merge([input: Input, retry_ms: 20], opts))
 
   # Starts and runs the first scan.
   defp scanned(opts \\ []) do

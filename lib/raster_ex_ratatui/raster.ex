@@ -764,11 +764,34 @@ defmodule RasterExRatatui.Raster do
     rows
   end
 
-  # Rotated: each panel row of the patch gathers its samples straight from
-  # the bitmap. At 90 and 270 a panel row is a column of the app's image, so
-  # the per-row key is a source column and the per-pixel offsets walk source
-  # rows; at 180 it is a source row walked backwards. Rows sharing a key (an
-  # upscaled region) are gathered once.
+  # Rotated by 90 or 270 with the bitmap at panel size (the usual case): a
+  # panel row is one column of the bitmap, gathered in a single bit-syntax
+  # pass over the rows instead of a `binary_part` per pixel. At 90 the
+  # column runs bottom to top, so the rows are reversed once first.
+  defp region_rows(
+         %__MODULE__{rotate: rotate} = raster,
+         %Region{pixel_width: pw, pixel_height: ph} = region,
+         {rect_w, rect_h},
+         {x0, y0, _out_w, out_h}
+       )
+       when rotate in [90, 270] and pw == region.width * elem(raster.cell_size, 0) and
+              ph == region.height * elem(raster.cell_size, 1) do
+    %{format: format, config: config} = raster
+    line = pw * 3
+    rows = binary_part(region.data, 0, rect_h * line)
+    source = if rotate == 90, do: reverse_rows(rows, line), else: rows
+
+    for py <- 0..(out_h - 1) do
+      dx = if rotate == 90, do: py, else: rect_w - 1 - py
+      PixelFormat.rgb_row(format, column(source, dx * 3, line - dx * 3 - 3), x0, y0 + py, config)
+    end
+  end
+
+  # Rotated, with the bitmap scaled onto its rect: each panel row of the
+  # patch gathers its samples one by one. At 90 and 270 a panel row is a
+  # column of the app's image, so the per-row key is a source column and the
+  # per-pixel offsets walk source rows; at 180 it is a source row walked
+  # backwards. Rows sharing a key (an upscaled region) are gathered once.
   defp region_rows(
          %__MODULE__{rotate: rotate} = raster,
          %Region{pixel_width: pw, pixel_height: ph} = region,
@@ -801,6 +824,18 @@ defmodule RasterExRatatui.Raster do
 
   defp gather(data, offsets, base) do
     for offset <- offsets, into: <<>>, do: binary_part(data, offset + base, 3)
+  end
+
+  # One pixel column of a row-major RGB8 bitmap, top to bottom: `skip`
+  # bytes before it and `tail` after it on every row.
+  defp column(rows, skip, tail) do
+    for <<_::binary-size(^skip), pixel::binary-size(3), _::binary-size(^tail) <- rows>>,
+      into: <<>>,
+      do: pixel
+  end
+
+  defp reverse_rows(rows, line) do
+    for(<<row::binary-size(^line) <- rows>>, do: row) |> Enum.reverse() |> IO.iodata_to_binary()
   end
 
   defp source_row(data, sy, pw, nil), do: binary_part(data, sy * pw * 3, pw * 3)
