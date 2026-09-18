@@ -74,9 +74,9 @@ Some panels only take whole frames: an e-ink controller that refreshes the entir
 
 ## Slow panels
 
-An e-ink refresh can take a second. `min_interval: 1_000` makes the surface push at most once per second: renders that arrive sooner are still rasterised (the raster must see every diff), and their patches are pushed together when the interval has passed. The app is never slowed down; it keeps rendering at its own pace.
+An e-ink refresh can take a second. `min_interval: 1_000` makes the surface push at most once per second: renders that arrive sooner wait, then go through the raster together and out in one push when the interval has passed. The app is never slowed down; it keeps rendering at its own pace.
 
-Without `min_interval` the surface still never falls behind a slow device: while `push/2` is busy, new renders are rasterised as they arrive and all of them go out in the next push, so a panel that takes 200 ms per write simply shows fewer, larger updates instead of an ever-growing queue.
+Without `min_interval` the surface still never falls behind a slow device or a slow raster. Whenever it gets to work, every render waiting in its mailbox is folded into the raster as one batch (`RasterExRatatui.Raster.apply/2` takes a list) and pushed at once, so a cell or region that changed five times is drawn in its final state only. A panel that takes 200 ms per write, or a pixel region that takes 200 ms to rasterise, shows fewer, later frames instead of an ever-growing queue, and a key press never waits behind stale animation frames. The `[:raster_ex_ratatui, :frame, :raster]` telemetry event reports how many diffs each batch folded; a steady count above 1 means the app renders faster than the surface can show, which is fine, and where a slower tick or a smaller region pays off.
 
 ## Input
 

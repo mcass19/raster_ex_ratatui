@@ -35,7 +35,7 @@ end
 - Send input with `RasterExRatatui.Surface.send_event(surface, %ExRatatui.Event.Key{code: "enter", kind: "press"})`. Codes are lowercase strings and `kind` is the string `"press"`, never an atom.
 - From `handle_info/2`, return `{:events, [event], state}` to forward events, `{:noreply, state}` otherwise.
 - The surface exits when the app exits (same reason). Put the surface under a supervisor; do not try to restart the app inside it.
-- `min_interval:` (ms) throttles pushes for slow panels; renders are still rasterised in between. A slow `push/2` never builds a backlog: renders that arrive during a push are pushed together in the next call.
+- `min_interval:` (ms) throttles pushes for slow panels. The surface never builds a backlog: every render waiting when it gets to work is folded into one `Raster.apply/2` call (it takes a list) and one push, so slow panels or big regions show fewer frames, never later ones. `[:raster_ex_ratatui, :frame, :raster]` reports `:diffs` per batch.
 - The generated child spec is `restart: :transient`: an app that quits with `{:stop, state}` stays stopped, a crash restarts. Override `child_spec/1` for a kiosk that must always come back.
 - `shutdown_timeout:` (default 4000 ms) bounds how long the surface waits for the app server to stop; keep it below the supervisor's shutdown so the consumer's `terminate/2` runs.
 

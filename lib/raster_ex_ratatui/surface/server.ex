@@ -4,10 +4,14 @@ defmodule RasterExRatatui.Surface.Server do
   # The process behind `use RasterExRatatui.Surface`. See that moduledoc
   # for the lifecycle; this module only implements it.
   #
-  # Pushes are coalesced: every diff is rasterised as it arrives, but the
-  # push goes through a self-sent flush message scheduled at most once. When
-  # push/2 is slower than the app renders, the diffs that arrive during a
-  # push queue ahead of the next flush, and all of them go out in one push.
+  # Renders are folded, not queued. When a diff arrives, every diff already
+  # waiting in the mailbox is taken with it, and the whole batch goes
+  # through one `Raster.apply/2` and one push, right away. So when the app
+  # renders faster than the surface rasterises or the panel writes, the
+  # surface shows fewer, later frames instead of every frame later and
+  # later, and a key event never waits behind stale renders. `min_interval`
+  # holds the batch back on a timer instead; nothing is rasterised until
+  # the push is due.
 
   use GenServer
 
@@ -27,7 +31,7 @@ defmodule RasterExRatatui.Surface.Server do
     :push_mode,
     :min_interval,
     :shutdown_timeout,
-    flush_scheduled: false,
+    timer: nil,
     last_push: nil,
     pending: []
   ]
@@ -107,32 +111,13 @@ defmodule RasterExRatatui.Surface.Server do
   end
 
   @impl true
-  # A diff rendered before a resize arrives with the old dimensions; the
-  # next render repaints the new grid in full, so it is dropped.
-  def handle_info(
-        {__MODULE__, :diff, %Diff{width: w, height: h}},
-        %__MODULE__{raster: %Raster{grid_size: grid_size}} = s
-      )
-      when {w, h} != grid_size do
-    {:noreply, s}
-  end
-
   def handle_info({__MODULE__, :diff, %Diff{} = diff}, %__MODULE__{} = s) do
-    {raster, patches} =
-      Telemetry.span([:frame, :raster], meta(s), fn ->
-        {raster, patches} = Raster.apply(s.raster, diff)
-        stop = %{cells: length(diff.ops), regions: length(diff.regions), patches: length(patches)}
-        {{raster, patches}, stop}
-      end)
-
-    case patches do
-      [] -> {:noreply, %{s | raster: raster}}
-      patches -> {:noreply, schedule_flush(%{s | raster: raster, pending: [patches | s.pending]})}
-    end
+    diffs = Enum.filter([diff | drain()], &current?(&1, s))
+    {:noreply, maybe_flush(%{s | pending: Enum.reverse(diffs, s.pending)})}
   end
 
   def handle_info({__MODULE__, :flush}, %__MODULE__{} = s) do
-    {:noreply, push(%{s | flush_scheduled: false})}
+    {:noreply, flush(%{s | timer: nil})}
   end
 
   def handle_info({:EXIT, server, reason}, %__MODULE__{server: server} = s) do
@@ -203,9 +188,23 @@ defmodule RasterExRatatui.Surface.Server do
     Telemetry.execute([:input, :forward], %{}, Map.put(meta(s), :event, event))
   end
 
-  defp schedule_flush(%__MODULE__{flush_scheduled: true} = s), do: s
+  # Every diff already in the mailbox, oldest first.
+  defp drain do
+    receive do
+      {__MODULE__, :diff, %Diff{} = diff} -> [diff | drain()]
+    after
+      0 -> []
+    end
+  end
 
-  defp schedule_flush(%__MODULE__{} = s) do
+  # A diff rendered before a resize arrives with the old dimensions; the
+  # next render repaints the new grid in full, so it is dropped.
+  defp current?(%Diff{width: w, height: h}, %__MODULE__{raster: %Raster{grid_size: size}}),
+    do: {w, h} == size
+
+  # Pushes as soon as the interval since the last push allows; otherwise a
+  # timer, at most one, flushes what has gathered by then.
+  defp maybe_flush(%__MODULE__{timer: nil} = s) do
     wait =
       case s.last_push do
         nil -> 0
@@ -213,25 +212,48 @@ defmodule RasterExRatatui.Surface.Server do
       end
 
     if wait > 0 do
-      Process.send_after(self(), {__MODULE__, :flush}, wait)
+      %{s | timer: Process.send_after(self(), {__MODULE__, :flush}, wait)}
     else
-      send(self(), {__MODULE__, :flush})
+      flush(s)
     end
-
-    %{s | flush_scheduled: true}
   end
 
-  # A resize drops the pending patches; a flush already on its way then has
-  # nothing to push.
-  defp push(%__MODULE__{pending: []} = s), do: s
+  defp maybe_flush(%__MODULE__{} = s), do: s
 
-  defp push(%__MODULE__{push_mode: :frame} = s) do
-    {raster, frame} = Raster.render_frame(s.raster)
-    do_push(%{s | raster: raster}, {:frame, frame})
-  end
+  # A resize drops the pending diffs; a flush already on its way then has
+  # nothing to do.
+  defp flush(%__MODULE__{pending: []} = s), do: s
 
-  defp push(%__MODULE__{} = s) do
-    do_push(s, s.pending |> Enum.reverse() |> Enum.concat())
+  defp flush(%__MODULE__{} = s) do
+    diffs = Enum.reverse(s.pending)
+
+    {raster, patches} =
+      Telemetry.span([:frame, :raster], meta(s), fn ->
+        {raster, patches} = Raster.apply(s.raster, diffs)
+
+        stop = %{
+          diffs: length(diffs),
+          cells: diffs |> Enum.map(&length(&1.ops)) |> Enum.sum(),
+          regions: length(List.last(diffs).regions),
+          patches: length(patches)
+        }
+
+        {{raster, patches}, stop}
+      end)
+
+    s = %{s | raster: raster, pending: []}
+
+    case {patches, s.push_mode} do
+      {[], _mode} ->
+        s
+
+      {patches, :patches} ->
+        do_push(s, patches)
+
+      {_patches, :frame} ->
+        {raster, frame} = Raster.render_frame(s.raster)
+        do_push(%{s | raster: raster}, {:frame, frame})
+    end
   end
 
   defp do_push(%__MODULE__{} = s, pixels) do
@@ -240,7 +262,7 @@ defmodule RasterExRatatui.Surface.Server do
         {s.module.push(pixels, s.state), %{}}
       end)
 
-    %{s | state: state, pending: [], last_push: System.monotonic_time(:millisecond)}
+    %{s | state: state, last_push: System.monotonic_time(:millisecond)}
   end
 
   defp validate!(_key, _value, true, _expected), do: :ok

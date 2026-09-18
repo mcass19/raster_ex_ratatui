@@ -44,13 +44,13 @@ defmodule RasterExRatatui.Surface do
     * `:format` (required) — a `RasterExRatatui.PixelFormat` module
     * `:font`, `:scale`, `:format_opts` — see `RasterExRatatui.Raster.new/1`
     * `:push_mode` — `:patches` (default) calls `c:push/2` with the changed rectangles; `:frame` calls it with `{:frame, binary}`, the whole panel, for panels that only take full frames
-    * `:min_interval` — minimum milliseconds between two pushes (default `0`). Diffs arriving sooner are still rasterised, and their patches are pushed together once the interval has passed, which keeps slow panels (e-ink, SPI at low baud) from refreshing more often than they should
+    * `:min_interval` — minimum milliseconds between two pushes (default `0`). Renders arriving sooner wait, and are rasterised together and pushed once when the interval has passed, which keeps slow panels (e-ink, SPI at low baud) from refreshing more often than they should
     * `:shutdown_timeout` — milliseconds to wait for the app server to stop when the surface terminates before killing it (default `4_000`), so the consumer's `c:terminate/2` still runs within a supervisor's default 5-second shutdown
     * `:name` — registers the surface process
 
   Every other option reaches `c:init/1` untouched, so device settings (a device path, a GPIO pin) can travel with the rest.
 
-  Pushes never queue up behind a slow device: every render is rasterised as it arrives, and all the renders that arrived while `c:push/2` was busy are pushed together in the next call.
+  The surface never falls behind the app. Every render that is waiting when the surface gets to work is folded into the raster as one batch (`RasterExRatatui.Raster.apply/2` with a list) and pushed at once, so when the app renders faster than the surface can rasterise or the panel can write, the panel shows fewer, later frames rather than every frame later and later, and input never waits behind stale renders. A `min_interval` holds the batch back instead.
 
   ## Input
 

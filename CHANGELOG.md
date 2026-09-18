@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `RasterExRatatui.Raster.apply/2` takes a list of payloads and rasterises them as one: the grid is folded through all of them first, so a cell or region that changed several times is drawn once, in its final state. The patches are those of the last state only.
+
+### Changed
+
+- The surface process folds renders instead of queuing them. When a diff arrives, every diff already waiting in the mailbox goes with it through one `Raster.apply/2` and one push, right away; before, each diff was rasterised on its own and the push went through a self-sent message that queued behind every render still waiting, so a panel whose raster took longer than the app's tick fell further behind on every frame (on a Raspberry Pi 4 with a turning `Viewport3D` region: one push every ~5 s, ~28 stacked copies of the same rectangle per push, and key presses ~5 s late). Now the panel shows fewer, later frames and input never waits behind stale renders. `min_interval:` holds the batch back on a timer instead of rasterising in between. The `[:raster_ex_ratatui, :frame, :raster]` `:stop` metadata gains `:diffs`, how many were folded into the call.
+
 ## [0.1.0] - 2026-09-15
 
 ### Added

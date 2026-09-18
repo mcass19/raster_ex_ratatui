@@ -147,7 +147,7 @@ defmodule RasterExRatatui.SurfaceTest do
       assert blit_all(before, pushes, 240, 1) == frame(surface)
     end
 
-    test "a diff with stale dimensions is dropped" do
+    test "a diff with stale dimensions is dropped, and a flush with nothing pending is a no-op" do
       surface = start_surface()
       stale = %Diff{width: 3, height: 3, ops: [%Cell{symbol: "x"}]}
 
@@ -156,6 +156,32 @@ defmodule RasterExRatatui.SurfaceTest do
 
       refute_receive {:pushed, _}, 100
       assert Surface.raster(surface).grid.width == 40
+    end
+
+    test "renders queued behind a slow push are rasterised as one" do
+      id = "surface-batch-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        id,
+        [:raster_ex_ratatui, :frame, :raster, :stop],
+        &__MODULE__.forward_event/4,
+        self()
+      )
+
+      on_exit(fn -> :telemetry.detach(id) end)
+
+      surface = start_surface(push_delay: 150)
+      assert_receive {:telemetry, _, %{pid: ^surface, diffs: 1}}
+      before = frame(surface)
+
+      for code <- ~w(a b c d e), do: Surface.send_event(surface, key(code))
+      pushes = collect_pushes(400)
+
+      batches = for {:telemetry, _, %{pid: ^surface, diffs: n}} <- flush_mailbox(), do: n
+      assert Enum.sum(batches) == 5
+      assert Enum.max(batches) > 1
+      assert length(pushes) == length(batches)
+      assert blit_all(before, pushes, 240, 1) == frame(surface)
     end
 
     test "push_mode: :frame pushes whole panels" do
@@ -271,7 +297,7 @@ defmodule RasterExRatatui.SurfaceTest do
       assert Map.take(start, [:surface, :mod, :pid]) == meta
 
       assert_receive {:telemetry, [_, :frame, :raster, :stop],
-                      %{pid: ^surface, cells: 800, regions: 0, patches: 20}}
+                      %{pid: ^surface, diffs: 1, cells: 800, regions: 0, patches: 20}}
 
       assert_receive {:telemetry, [_, :frame, :push, :stop],
                       %{pid: ^surface, push_mode: :patches}}
@@ -287,4 +313,12 @@ defmodule RasterExRatatui.SurfaceTest do
 
   def forward_event(event, _measurements, meta, test_pid),
     do: send(test_pid, {:telemetry, event, meta})
+
+  defp flush_mailbox do
+    receive do
+      message -> [message | flush_mailbox()]
+    after
+      0 -> []
+    end
+  end
 end

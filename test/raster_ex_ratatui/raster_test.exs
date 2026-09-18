@@ -231,6 +231,56 @@ defmodule RasterExRatatui.RasterTest do
              ]
     end
 
+    test "a list of diffs is rasterised once, in its final state" do
+      raster = mono()
+      {raster, _} = Raster.apply(raster, full_diff({4, 2}, []))
+
+      diffs =
+        for symbol <- ~w(a b c) do
+          %Diff{
+            width: 4,
+            height: 2,
+            ops: [%Cell{col: 1, symbol: symbol}, %Cell{col: 2, symbol: symbol}]
+          }
+        end
+
+      {batched, patches} = Raster.apply(raster, diffs)
+      {sequential, _} = Enum.reduce(diffs, {raster, []}, fn d, {r, _} -> Raster.apply(r, d) end)
+
+      assert [%Patch{x: 6, y: 0, width: 12}] = patches
+      assert Raster.frame(batched) == Raster.frame(sequential)
+    end
+
+    test "a list with a region changing in every diff patches the region once" do
+      raster = mono()
+      {raster, _} = Raster.apply(raster, full_diff({4, 2}, []))
+
+      diffs =
+        for shade <- [0, 128, 255],
+            do: %Diff{width: 4, height: 2, regions: [region(0, 0, 2, 1, {shade, shade, shade})]}
+
+      assert {_raster, [%Patch{x: 0, y: 0, width: 12, height: 8, data: data}]} =
+               Raster.apply(raster, diffs)
+
+      assert data == :binary.copy(@paper, 96)
+    end
+
+    test "a full payload inside a list repaints everything, an empty list nothing" do
+      raster = mono()
+      {raster, _} = Raster.apply(raster, full_diff({4, 2}, []))
+
+      diffs = [
+        %Diff{width: 4, height: 2, ops: [%Cell{symbol: "x"}]},
+        full_diff({4, 2}, []),
+        %Diff{width: 4, height: 2, ops: [%Cell{col: 3, row: 1, symbol: "y"}]}
+      ]
+
+      {_raster, patches} = Raster.apply(raster, diffs)
+      assert Enum.map(patches, &{&1.x, &1.y, &1.width}) == [{0, 0, 24}, {0, 8, 24}]
+
+      assert {^raster, []} = Raster.apply(raster, [])
+    end
+
     test "a region bitmap is scaled nearest-neighbour onto its rect" do
       data = <<0, 0, 0, 255, 255, 255, 255, 255, 255, 0, 0, 0>>
       region = %{region(0, 0, 2, 1, {0, 0, 0}) | pixel_width: 2, pixel_height: 2, data: data}
@@ -336,13 +386,18 @@ defmodule RasterExRatatui.RasterTest do
 
         {raster, _} = Raster.apply(raster, full_diff({5, 3}, []))
 
-        Enum.reduce(steps, {raster, Raster.frame(raster)}, fn diff, {raster, frame} ->
-          {raster, patches} = Raster.apply(raster, diff)
+        {sequential, _frame} =
+          Enum.reduce(steps, {raster, Raster.frame(raster)}, fn diff, {raster, frame} ->
+            {raster, patches} = Raster.apply(raster, diff)
 
-          next = Raster.frame(raster)
-          assert blit(frame, raster, patches) == next
-          {raster, next}
-        end)
+            next = Raster.frame(raster)
+            assert blit(frame, raster, patches) == next
+            {raster, next}
+          end)
+
+        # The same steps as one list: one set of patches, the same final frame.
+        {batched, patches} = Raster.apply(raster, steps)
+        assert blit(Raster.frame(raster), batched, patches) == Raster.frame(sequential)
       end
     end
   end

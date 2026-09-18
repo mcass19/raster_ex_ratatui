@@ -12,7 +12,7 @@ defmodule RasterExRatatui.Telemetry do
 
   | Event | Description | Metadata |
   | ----- | ----------- | -------- |
-  | `[:raster_ex_ratatui, :frame, :raster]` | `RasterExRatatui.Raster.apply/2` on one diff from the app server. | `:surface`, `:mod`, `:pid`; `:stop` adds `:cells`, `:regions`, `:patches` |
+  | `[:raster_ex_ratatui, :frame, :raster]` | `RasterExRatatui.Raster.apply/2` on the diffs waiting from the app server. | `:surface`, `:mod`, `:pid`; `:stop` adds `:diffs` (how many were folded into this call), `:cells`, `:regions`, `:patches` |
   | `[:raster_ex_ratatui, :frame, :push]` | The consumer's `c:RasterExRatatui.Surface.push/2` call. | `:surface`, `:mod`, `:pid`, `:push_mode` |
 
   `:surface` is the surface module, `:mod` the app module, and `:pid` the surface process, which tells apart several surfaces running the same modules.

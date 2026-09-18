@@ -88,3 +88,42 @@ for {w, h} <- [{20, 10}, {53, 22}] do
     Raster.apply(warm, %Diff{width: cols, height: rows, regions: [region]})
   end)
 end
+
+# A still image beside an animation.
+gradient = fn pw, ph, blue ->
+  for y <- 0..(ph - 1), x <- 0..(pw - 1), into: <<>>, do: <<rem(x, 256), rem(y, 256), blue>>
+end
+
+still = %Region{
+  x: 50,
+  y: 2,
+  width: 53,
+  height: 22,
+  pixel_width: 954,
+  pixel_height: 528,
+  data: gradient.(954, 528, 128)
+}
+
+turning = fn blue ->
+  %Region{
+    x: 2,
+    y: 2,
+    width: 20,
+    height: 10,
+    pixel_width: 360,
+    pixel_height: 240,
+    data: gradient.(360, 240, blue)
+  }
+end
+
+[before, after_turn] = [turning.(0), turning.(255)]
+{both, _} = Raster.apply(warm, %Diff{width: cols, height: rows, regions: [still, before]})
+
+# Ten renders folded into one call, as the surface does when it has fallen
+# behind: the region is rasterised once, in its final state.
+turns =
+  for blue <- 1..10, do: %Diff{width: cols, height: rows, regions: [still, turning.(blue * 20)]}
+
+RasterBench.measure("apply/2, ten queued turns of that region as one list", 10, fn ->
+  Raster.apply(both, turns)
+end)

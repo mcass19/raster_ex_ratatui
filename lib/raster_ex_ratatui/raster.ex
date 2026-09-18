@@ -25,6 +25,8 @@ defmodule RasterExRatatui.Raster do
 
   Cells under a pixel region are never rasterised, on full payloads or diffs: they arrive blank and the region paints over them.
 
+  `apply/2` also takes a **list** of payloads and rasterises them as one: the grid is folded through all of them first, so a cell or region that changed several times is drawn once, in its final state. A consumer that falls behind its app (a slow panel, a big pixel region) folds everything queued into one call instead of drawing frames nobody will see; the surface process does exactly that.
+
   Patches must be written in list order. `frame/1` renders the whole panel as one buffer for panels that only take full frames (`render_frame/1` does the same and keeps the glyph cache it fills); writing `apply/2`'s patches over the previous `frame/1` gives the next one.
   """
 
@@ -34,6 +36,9 @@ defmodule RasterExRatatui.Raster do
   @cache_limit 4096
 
   @type size :: {pos_integer(), pos_integer()}
+
+  @typedoc "What `apply/2` folds in: a cell diff or a snapshot from an `ExRatatui.CellSession`."
+  @type payload :: Snapshot.t() | Diff.t()
 
   @type t :: %__MODULE__{
           size: size(),
@@ -215,9 +220,9 @@ defmodule RasterExRatatui.Raster do
   end
 
   @doc """
-  Folds a snapshot or diff into the raster and returns the patches that repaint what changed.
+  Folds a snapshot or diff, or a list of them in order, into the raster and returns the patches that repaint what changed.
 
-  See the moduledoc for which patches are produced.
+  See the moduledoc for which patches are produced. A list produces the patches of its last state only, never of the states in between; an empty list produces none.
 
   ## Examples
 
@@ -231,12 +236,31 @@ defmodule RasterExRatatui.Raster do
       iex> {_raster, [cell]} = Raster.apply(raster, %Diff{width: 2, height: 1, ops: [%Cell{col: 1, symbol: "B"}]})
       iex> {cell.x, cell.width}
       {6, 6}
+      iex> twice = [%Diff{width: 2, height: 1, ops: [%Cell{col: 0, symbol: "C"}]}, %Diff{width: 2, height: 1, ops: [%Cell{col: 0, symbol: "D"}]}]
+      iex> {_raster, [once]} = Raster.apply(raster, twice)
+      iex> {once.x, once.width}
+      {0, 6}
   """
-  @spec apply(t(), Snapshot.t() | Diff.t()) :: {t(), [Patch.t()]}
-  def apply(%__MODULE__{} = raster, payload) do
+  @spec apply(t(), payload() | [payload()]) :: {t(), [Patch.t()]}
+  def apply(%__MODULE__{} = raster, payloads) when is_list(payloads) do
     old_regions = drawable(raster.grid.regions)
-    {grid, changed, regions_changed?} = Grid.apply(raster.grid, payload)
-    raster = %{raster | grid: grid}
+
+    {grid, changed, regions_changed?} =
+      Enum.reduce(payloads, {raster.grid, [], false}, fn payload, {grid, changed, regions?} ->
+        {grid, more, more_regions?} = Grid.apply(grid, payload)
+        {grid, merge_changed(changed, more), regions? or more_regions?}
+      end)
+
+    patches(%{raster | grid: grid}, old_regions, changed, regions_changed?)
+  end
+
+  def apply(%__MODULE__{} = raster, payload), do: __MODULE__.apply(raster, [payload])
+
+  defp merge_changed(:all, _more), do: :all
+  defp merge_changed(_changed, :all), do: :all
+  defp merge_changed(changed, more), do: more ++ changed
+
+  defp patches(%__MODULE__{grid: grid} = raster, old_regions, changed, regions_changed?) do
     regions = drawable(grid.regions)
 
     case changed do
