@@ -4,7 +4,7 @@ A Nerves project that puts an ExRatatui dashboard on a Raspberry Pi's display th
 
 It is the example for the **surface process**: `RpiFramebuffer.Surface` is a `RasterExRatatui.Surface` under a supervisor. For a device that keeps its own screen process and uses the pure core instead, see [`e_ink`](../e_ink).
 
-> **Status:** the project is tested on the host against a fake sysfs and a file standing in for `/dev/fb0`. Its first run on the Pi is pending; this note goes away with the device results.
+> **Status:** runs on a Raspberry Pi 4 with the Touch Display 2 (Nerves system 2.0.1, ex_ratatui 0.14.1). The dashboard comes up in portrait about twenty seconds after power, with no console or cursor over it, the keyboard is found at boot, and `ctrl+q` restarts the dashboard. With the Showcase tab turning its object five times a second, a frame costs about 43 ms to rasterise and 13 ms to write, and the surface keeps up. Tests run on the host against a fake sysfs and a file standing in for `/dev/fb0`.
 
 ## What is on the panel
 
@@ -112,7 +112,13 @@ InputEvent.enumerate()
 RingLogger.next()
 ```
 
-The surface logs the geometry, format, and scale it chose, and the keyboard it found.
+The surface logs the geometry, format, and scale it chose, and the keyboard it found. To see whether the panel keeps up:
+
+```elixir
+RasterExRatatui.Telemetry.probe(RpiFramebuffer.Surface, 10)
+```
+
+On the Touch Display 2 with the Showcase tab turning its object five times a second: `raster` about 43 ms and `push` about 13 ms per frame, mailbox `0 -> 0`.
 
 ## Troubleshooting
 

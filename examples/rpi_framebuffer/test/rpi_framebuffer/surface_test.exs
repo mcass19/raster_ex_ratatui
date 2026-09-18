@@ -31,6 +31,13 @@ defmodule RpiFramebuffer.SurfaceTest do
       send(test, {:reader, reader, opts})
       {:ok, reader}
     end
+
+    def stop(reader) do
+      {test, _devices} = Agent.get(__MODULE__, & &1)
+      Process.exit(reader, :kill)
+      send(test, {:stopped, reader})
+      :ok
+    end
   end
 
   @keyboard {"/dev/input/event1", %{report_info: [ev_key: [:key_esc, :key_a, :key_tab]]}}
@@ -149,6 +156,31 @@ defmodule RpiFramebuffer.SurfaceTest do
 
       assert_receive {:reader, other, path: "/dev/input/event1", grab: true}
       assert other != reader
+    end
+
+    test "is released when the surface stops normally, so the next surface can grab it", %{
+      root: root
+    } do
+      surface = start_supervised!({Surface, root: root, input: Input})
+      assert_receive {:reader, reader, _opts}
+
+      :ok = GenServer.stop(surface)
+
+      assert_receive {:stopped, ^reader}
+      refute Process.alive?(reader)
+    end
+
+    test "a disconnect drops held modifiers and does not crash the surface", %{root: root} do
+      surface = start_supervised!({Surface, root: root, input: Input})
+      assert_receive {:reader, reader, _opts}
+
+      send(surface, {:input_event, "/dev/input/event1", [{:ev_key, :key_leftshift, 1}]})
+      send(surface, {:input_event, "/dev/input/event1", :disconnect})
+      Process.exit(reader, :kill)
+
+      assert_receive {:reader, other, _opts}
+      assert other != reader
+      assert Process.alive?(surface)
     end
 
     test "is awaited when there is none", %{root: root} do

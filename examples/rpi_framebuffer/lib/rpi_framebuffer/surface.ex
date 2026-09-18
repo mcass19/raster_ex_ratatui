@@ -6,7 +6,7 @@ defmodule RpiFramebuffer.Surface do
 
   The display drivers are kernel modules that load while the system boots, so `/dev/fb0` can show up seconds after the application starts. `init/1` waits for it (`:framebuffer_timeout`) instead of failing on the first look.
 
-  A keyboard that is missing at boot, or unplugged later, is looked for again every two seconds. Its reader is linked to the surface and grabs the device, so keys reach the dashboard and nothing else.
+  A keyboard that is missing at boot, or unplugged later, is looked for again every two seconds. Its reader grabs the device, so keys reach the dashboard and nothing else, and the surface stops the reader when it stops itself: a linked process does not follow a normal exit (the dashboard quitting on `ctrl+q`), and a reader left behind keeps the grab, so the next surface's reader is disconnected at once.
 
   Patches go to the device as they come: `push/2` is one positioned write per patch row, in a single `:file.pwrite/2`.
 
@@ -106,6 +106,14 @@ defmodule RpiFramebuffer.Surface do
   end
 
   @impl true
+  # The reader says :disconnect when its keyboard goes away or another reader
+  # holds the grab, then exits; the EXIT below starts the search again.
+  def handle_info({:input_event, path, :disconnect}, state) do
+    Logger.info("RpiFramebuffer.Surface: the keyboard at #{path} went away")
+    {keyboard, []} = Evdev.translate_all(state.keyboard, :disconnect)
+    {:noreply, %{state | keyboard: keyboard}}
+  end
+
   def handle_info({:input_event, _path, events}, state) do
     {keyboard, keys} = Evdev.translate_all(state.keyboard, events)
     {:events, keys, %{state | keyboard: keyboard}}
@@ -136,7 +144,10 @@ defmodule RpiFramebuffer.Surface do
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl true
-  def terminate(_reason, state), do: Framebuffer.close(state.fb)
+  def terminate(_reason, state) do
+    if is_pid(state.reader) and Process.alive?(state.reader), do: state.input.stop(state.reader)
+    Framebuffer.close(state.fb)
+  end
 
   @doc """
   The largest integer font scale that keeps at least #{@columns} columns of the 6-pixel-wide library font on the panel's long side, and never less than 1.

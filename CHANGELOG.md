@@ -13,7 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `examples/e_ink`: a walk through the e-ink name badge, the consumer that uses the pure core from its own screen process instead of a surface.
 - `RasterExRatatui.Raster.apply/2` takes a list of payloads and rasterises them as one: the grid is folded through all of them first, so a cell or region that changed several times is drawn once, in its final state. The patches are those of the last state only.
 
+- `RasterExRatatui.Telemetry.probe/3` watches a surface for a few seconds from IEx and reports the raster and push spans (count, median, p90, max) and the surface's mailbox before and after, the quickest way to tell whether a panel keeps up with its app.
 - `RasterExRatatui.PixelFormat` gains an optional `rgb_row/4` callback that packs a whole row of region pixels in one call, plus `RasterExRatatui.PixelFormat.rgb_row/5`, the per-pixel fallback the raster uses for formats without one. `Mono`, `RGB565`, and `XRGB8888` implement it.
+
+### Fixed
+
+- `RasterExRatatui.Input.Evdev.translate_all/2` accepts the `:disconnect` that `input_event` sends in place of the event list when a device goes away: held modifiers are released and no keys are produced. The Linux Framebuffers guide's surface sketch handles it, and stops its reader in `terminate/2`: a reader that is only linked survives a surface that stops normally (its app quit) and keeps its grab on the keyboard, so the next surface's reader was disconnected at once, and the `rpi_framebuffer` example crashed on that message three times and took the application down. The example now does both.
 
 ### Changed
 

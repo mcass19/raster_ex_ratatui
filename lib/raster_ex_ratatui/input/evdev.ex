@@ -198,6 +198,8 @@ defmodule RasterExRatatui.Input.Evdev do
   @doc """
   Translates a list of evdev events in order, as delivered in one `{:input_event, path, events}` message.
 
+  `input_event` sends `:disconnect` in place of the list when the device goes away (unplugged, or grabbed by another reader). That releases every held modifier and produces no keys; the consumer is the one to look for a keyboard again.
+
   ## Examples
 
       iex> alias RasterExRatatui.Input.Evdev
@@ -205,8 +207,16 @@ defmodule RasterExRatatui.Input.Evdev do
       iex> {_keyboard, keys} = Evdev.translate_all(Evdev.new(), events)
       iex> keys
       [%ExRatatui.Event.Key{code: "c", kind: "press", modifiers: ["ctrl"]}]
+      iex> {keyboard, []} = Evdev.translate_all(Evdev.new(), [{:ev_key, :key_leftshift, 1}])
+      iex> {keyboard, []} = Evdev.translate_all(keyboard, :disconnect)
+      iex> MapSet.size(keyboard.held)
+      0
   """
-  @spec translate_all(t(), [{atom(), atom(), integer()}]) :: {t(), [Key.t()]}
+  @spec translate_all(t(), [{atom(), atom(), integer()}] | :disconnect) :: {t(), [Key.t()]}
+  def translate_all(%__MODULE__{} = keyboard, :disconnect) do
+    {%{keyboard | held: MapSet.new(), caps_lock: false}, []}
+  end
+
   def translate_all(%__MODULE__{} = keyboard, events) when is_list(events) do
     {keyboard, keys} =
       Enum.reduce(events, {keyboard, []}, fn event, {keyboard, acc} ->
