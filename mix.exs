@@ -110,7 +110,8 @@ defmodule RasterExRatatui.MixProject do
       ],
       groups_for_modules: [
         Surface: [
-          RasterExRatatui.Surface
+          RasterExRatatui.Surface,
+          RasterExRatatui.Framebuffer.Surface
         ],
         Core: [
           RasterExRatatui,

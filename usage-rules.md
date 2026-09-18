@@ -8,9 +8,24 @@ It is **not** a terminal emulator, a font renderer, or a display driver, and app
 
 | Use | When |
 |-----|------|
-| `use RasterExRatatui.Surface` | The default. A supervised process owns the app, rasterises, and calls `push/2` |
+| `use RasterExRatatui.Framebuffer.Surface, app: MyApp` | A Linux framebuffer (`/dev/fb0`) with an evdev keyboard: one line, every default an option or an override |
+| `use RasterExRatatui.Surface` | Any other panel. A supervised process owns the app, rasterises, and calls `push/2` |
 | `RasterExRatatui.Session` | The consumer already owns a process in charge of the panel: the same app server, raster, and folding, driven from that process's mailbox |
 | `RasterExRatatui.Raster` directly | Rasterising payloads that come from somewhere else (a headless `CellSession`, a test) |
+
+## Framebuffer surfaces
+
+```elixir
+defmodule MyDevice.Surface do
+  use RasterExRatatui.Framebuffer.Surface, app: MyDevice.App, rotate: 90
+end
+```
+
+- Never hardcode the panel: size and depth come from sysfs, the format from the depth, the scale from the long side (`scale: :auto`). Override with `scale:`, `framebuffer:`, `console:`, `keyboard:`, `rotate:`.
+- `on_app_exit` defaults to `:restart` here (a panel has nothing else to show); `push_mode` is `:patches`.
+- To extend, override `init/1`, `push/2`, `handle_info/2`, or `terminate/2` and call `RasterExRatatui.Framebuffer.Surface.<same>/n` from the override. The state is `%{fb:, devices:}` plus whatever the override adds.
+- Add `{:input_event, "~> 1.4"}` to the deps for the keyboard. Without it the surface logs once and runs input-less; do not add `input_event` to a host-only project.
+- Test against a fake tree with `root:` (sysfs files + an empty `dev/fb0`) and `input:` (a stub module with `enumerate/0`, `start_link/1`, `stop/1`).
 
 ## Surfaces
 

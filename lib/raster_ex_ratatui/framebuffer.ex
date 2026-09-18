@@ -80,6 +80,35 @@ defmodule RasterExRatatui.Framebuffer do
   def format_for(%{bits_per_pixel: _other}), do: {:error, :unsupported}
 
   @doc """
+  The largest integer font scale that keeps at least `columns:` (default `100`) cells of the font (default `RasterExRatatui.Font.Default6x8`) along the panel's long side, and never less than 1.
+
+  The long side is the same whichever way the panel is rotated, so this holds for the app's logical image too.
+
+  ## Examples
+
+  The Touch Display 2, 720×1280, gets 12×16 pixel cells: 60×80 in portrait, 106×45 turned; a 1080p monitor gets 18×24 pixel cells, 106×45.
+
+      iex> RasterExRatatui.Framebuffer.auto_scale({720, 1280})
+      2
+
+      iex> RasterExRatatui.Framebuffer.auto_scale({1920, 1080})
+      3
+
+      iex> RasterExRatatui.Framebuffer.auto_scale({3840, 2160}, columns: 200)
+      3
+
+      iex> RasterExRatatui.Framebuffer.auto_scale({480, 320})
+      1
+  """
+  @spec auto_scale({pos_integer(), pos_integer()}, keyword()) :: pos_integer()
+  def auto_scale({width, height}, opts \\ []) do
+    font = Keyword.get(opts, :font, RasterExRatatui.Font.Default6x8)
+    columns = Keyword.get(opts, :columns, 100)
+    {cell_w, _cell_h} = font.cell_size()
+    max(div(max(width, height), columns * cell_w), 1)
+  end
+
+  @doc """
   Reads the geometry of framebuffer `name` and opens `/dev/<name>` for writing.
   """
   @spec open(String.t(), keyword()) :: {:ok, t()} | {:error, term()}

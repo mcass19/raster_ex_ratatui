@@ -1,6 +1,6 @@
 # Linux Framebuffers
 
-A Linux framebuffer exposes a display as a file: `/dev/fb0` holds the pixels and `/sys/class/graphics/fb0` describes them, so no driver code is needed on the Elixir side. `RasterExRatatui.Framebuffer` reads that geometry and writes patches to the device, and `RasterExRatatui.Input.Evdev` turns keyboard events into the key structs an ExRatatui app expects. This guide wires both into a surface.
+A Linux framebuffer exposes a display as a file: `/dev/fb0` holds the pixels and `/sys/class/graphics/fb0` describes them, so no driver code is needed on the Elixir side. `RasterExRatatui.Framebuffer.Surface` is a complete surface for one, keyboard included; `RasterExRatatui.Framebuffer` and `RasterExRatatui.Input.Devices` are the pieces it is made of. This guide covers the device side of both.
 
 > #### Status {: .info}
 >
@@ -34,63 +34,27 @@ The depth is whatever the kernel chose, so read `bits_per_pixel` instead of assu
 
 ## The surface
 
-A sketch of a surface for `/dev/fb0` with a keyboard read through [`input_event`](https://hex.pm/packages/input_event) (a dependency of the consumer, not of this library). The [`rpi_framebuffer`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/rpi_framebuffer) example is the complete version: a Nerves project with the scale derived from the panel size, a keyboard that can come and go, and tests against a fake sysfs.
-
 ```elixir
-defmodule MyDevice.FramebufferSurface do
-  use RasterExRatatui.Surface, app: MyDevice.Dashboard, scale: 3
-
-  alias RasterExRatatui.Framebuffer
-  alias RasterExRatatui.Input.Evdev
-
-  @impl true
-  def init(_opts) do
-    {:ok, fb} = Framebuffer.open("fb0")
-    {:ok, format} = Framebuffer.format_for(fb.info)
-    _ = Framebuffer.unbind_console("vtcon1")
-
-    {:ok, _reader} = InputEvent.start_link(path: keyboard_path(), grab: true)
-
-    {:ok, [size: {fb.info.width, fb.info.height}, format: format], %{fb: fb, keyboard: Evdev.new()}}
-  end
-
-  @impl true
-  def push(pixels, state) do
-    :ok = Framebuffer.write(state.fb, pixels)
-    state
-  end
-
-  @impl true
-  def handle_info({:input_event, _path, events}, state) do
-    # `events` is `:disconnect` when the keyboard goes away; Evdev drops the
-    # held modifiers, and a real surface then looks for a keyboard again.
-    {keyboard, keys} = Evdev.translate_all(state.keyboard, events)
-    {:events, keys, %{state | keyboard: keyboard}}
-  end
-
-  def handle_info(_msg, state), do: {:noreply, state}
-
-  # The reader is only linked, and a surface that stops normally (its app quit)
-  # does not take a linked process with it: stop it, or its grab on the device
-  # outlives the surface and the next one gets `:disconnect` at once.
-  @impl true
-  def terminate(_reason, %{reader: reader}) when is_pid(reader), do: GenServer.stop(reader)
-  def terminate(_reason, _state), do: :ok
-
-  defp keyboard_path do
-    {path, _info} =
-      Enum.find(InputEvent.enumerate(), fn {_path, info} ->
-        Enum.any?(info.report_info, &match?({:ev_key, keys} when is_list(keys) and :key_a in keys, &1))
-      end)
-
-    path
-  end
+defmodule MyDevice.Surface do
+  use RasterExRatatui.Framebuffer.Surface, app: MyDevice.Dashboard
 end
 ```
 
-`Framebuffer.write/2` places every patch row at `y * stride + x * bytes_per_pixel`, so line padding (a stride longer than the visible line) is handled; a full frame is written the same way.
+`RasterExRatatui.Framebuffer.Surface` is the whole thing: it waits for `/dev/fb0` (the display drivers are kernel modules that load during boot; on the Pi 4 the DSI panel probed about ten seconds after the application started), reads the geometry, picks `RGB565` or `XRGB8888` from the depth and a font scale that keeps about a hundred columns on the long side, detaches the framebuffer console, reads the keyboard through `RasterExRatatui.Input.Devices`, and starts the app again when it quits. Its moduledoc has the option table: `framebuffer:`, `scale:`, `rotate:`, `console:`, `keyboard:`, and the rest.
 
-The display drivers are kernel modules that load while the system boots, so `/dev/fb0` can appear seconds after the application starts (on the Pi 4 the DSI panel probed about ten seconds after the app). A surface that fails on its first look takes the application down with it; the example keeps trying `Framebuffer.open/2` for thirty seconds instead.
+### Under the hood
+
+The `use` gives the module `init/1`, `push/2`, `handle_info/2`, and `terminate/2` delegating to `RasterExRatatui.Framebuffer.Surface`'s functions of the same name, and every one is overridable: an override calls the default and adds to it. The state is a map with `:fb`, the open `RasterExRatatui.Framebuffer`, and `:devices`, the `RasterExRatatui.Input.Devices`.
+
+```elixir
+@impl true
+def init(opts) do
+  {:ok, config, state} = RasterExRatatui.Framebuffer.Surface.init(opts)
+  {:ok, config, Map.put(state, :backlight, MyDevice.Backlight.on!())}
+end
+```
+
+Underneath, `Framebuffer.open/2` reads `virtual_size`, `bits_per_pixel`, and `stride` from sysfs and opens the device; `Framebuffer.write/2` places every patch row at `y * stride + x * bytes_per_pixel`, so line padding (a stride longer than the visible line) is handled, and a full frame is written the same way. A surface for a panel that is not a framebuffer uses those pieces from a `RasterExRatatui.Surface` of its own.
 
 ## A panel on its side
 
@@ -105,29 +69,9 @@ The kernel's framebuffer console draws on the same device, so boot messages, a l
 
 ## The keyboard
 
-`RasterExRatatui.Input.Devices` owns the keyboard: it finds the first `/dev/input/eventN` that reports letter keys (or reads the path it is given), starts an [`input_event`](https://hex.pm/packages/input_event) reader on it with `grab: true` so keystrokes do not also reach the kernel console, translates what the reader delivers through `RasterExRatatui.Input.Evdev` into the same `%ExRatatui.Event.Key{}` structs a terminal would send (shift, ctrl, alt, super, and caps lock tracked; other layouts a `layout:` map away), and keeps looking, every two seconds, whenever there is no keyboard: at boot before one is plugged in, and again after one is unplugged, starting from a fresh translator so modifiers held on the old keyboard do not stick. It is process-less: the surface builds it in `init/1` with `Devices.new/1` + `Devices.start/1`, hands it every message in `handle_info/2` and returns the `{:events, keys, state}` it gets back, and calls `Devices.stop/1` in `terminate/2` so no reader outlives the surface holding the grab.
+`RasterExRatatui.Input.Devices` owns the keyboard: it finds the first `/dev/input/eventN` that reports letter keys (or reads the path it is given), starts an [`input_event`](https://hex.pm/packages/input_event) reader on it with `grab: true` so keystrokes do not also reach the kernel console, translates what the reader delivers through `RasterExRatatui.Input.Evdev` into the same `%ExRatatui.Event.Key{}` structs a terminal would send (shift, ctrl, alt, super, and caps lock tracked; other layouts a `layout:` map away), and keeps looking, every two seconds, whenever there is no keyboard: at boot before one is plugged in, and again after one is unplugged, starting from a fresh translator so modifiers held on the old keyboard do not stick. The framebuffer surface embeds it; a surface of its own does the same in three lines: `Devices.new/1` + `Devices.start/1` in `init/1`, every message through `Devices.handle_info/2`, `Devices.stop/1` in `terminate/2` so no reader outlives the surface holding the grab.
 
-```elixir
-@impl true
-def init(opts) do
-  {:ok, devices} = RasterExRatatui.Input.Devices.start(RasterExRatatui.Input.Devices.new(keyboard: true))
-  {:ok, [], %{fb: open_framebuffer(opts), devices: devices}}
-end
-
-@impl true
-def handle_info(msg, state) do
-  case RasterExRatatui.Input.Devices.handle_info(msg, state.devices) do
-    {:events, keys, devices} -> {:events, keys, %{state | devices: devices}}
-    {:noreply, devices} -> {:noreply, %{state | devices: devices}}
-    :unknown -> {:noreply, state}
-  end
-end
-
-@impl true
-def terminate(_reason, state), do: RasterExRatatui.Input.Devices.stop(state.devices)
-```
-
-`input_event` is a C port that only builds on Linux, so it is the consumer's dependency, not this library's: add `{:input_event, "~> 1.4"}` to the project. `Devices.start/1` returns `{:error, :input_event_missing}` when the module is not there, which a host build can treat as "no input". The `:input` option swaps the module for a stub in tests. One thing to know about `input_event`: `InputEvent.enumerate/0` starts and stops a short-lived reader per device from the calling process, so a surface, which traps exits, sees their `:normal` exits in `handle_info/2`; `Devices.handle_info/2` answers `:unknown` to those and the surface ignores them.
+`input_event` is a C port that only builds on Linux, so it is the consumer's dependency, not this library's: add `{:input_event, "~> 1.4"}` to the project. Without it `Devices.start/1` returns `{:error, :input_event_missing}` and the framebuffer surface logs a warning once and runs without input, so the project still compiles and tests on a host. One thing to know about `input_event`: `InputEvent.enumerate/0` starts and stops a short-lived reader per device from the calling process, so a surface, which traps exits, sees their `:normal` exits in `handle_info/2`; `Devices.handle_info/2` answers `:unknown` to those and the surface ignores them.
 
 ## Performance
 

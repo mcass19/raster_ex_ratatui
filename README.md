@@ -21,47 +21,48 @@ ExRatatui app ──> ExRatatui.Server ──> CellSession diff (cells + regions
 
 ## Features
 
-- **A surface is one module** — `use RasterExRatatui.Surface`, return the panel geometry from `init/1`, write pixels in `push/2`. The surface process starts the app, folds diffs, rasterises, and forwards input.
+- **A framebuffer is one line** — `use RasterExRatatui.Framebuffer.Surface, app: MyApp`: geometry and format from sysfs, a font scale to match, the console detached, the keyboard found and found again, the app restarted when it quits.
+- **Any other panel is one module** — `use RasterExRatatui.Surface`, return the panel geometry from `init/1`, write pixels in `push/2`. The surface process starts the app, folds diffs, rasterises, and forwards input.
+- **Rotation** — `rotate: 90` turns the app for a panel mounted on its side; the panel is still written in its own orientation.
 - **Patches, not frames** — only changed cells (and changed pixel regions) are rasterised and pushed; `Raster.frame/1` renders a full buffer for panels that want one.
 - **Pixel regions** — `Viewport3D` and `Image` arrive as RGB bitmaps and are scaled onto their cell rect at the panel's native resolution.
 - **Pixel formats** — `Mono` (1-bit panels: tone rules for cells, Bayer dither for regions), `RGB565`, and `XRGB8888`, with a palette for named, indexed, and RGB colours.
 - **Fonts** — a built-in 6×8 bitmap font with box drawing, blocks, and braille, an integer `scale:` for large panels, and a `Font` behaviour to bring another.
-- **Device helpers** — `Framebuffer` for Linux fbdev (geometry from sysfs, stride-aware writes) and `Input.Evdev` to turn keyboard events into `ExRatatui.Event.Key` structs.
-- **Pure core** — `Raster`, `Grid`, fonts, and formats are plain functions, usable from any process that already owns its device.
+- **Device helpers** — `Framebuffer` for Linux fbdev (geometry from sysfs, stride-aware writes), `Input.Devices` to own evdev keyboards, `Input.Evdev` to translate their events.
+- **Own process** — `Session` runs the app on a raster from a process the consumer already has; `Raster`, `Grid`, fonts, and formats underneath are plain functions.
 
 ## Quick start
 
-The app needs no change: it is a plain `use ExRatatui.App` (or `ExRatatui.run/2`) that renders widgets exactly as it would in a terminal, so build and try it there first. Putting it on a panel is then one module, the surface, that answers three questions about the display: how big it is, how its pixels are packed, and how bytes reach it.
+The app needs no change: it is a plain `use ExRatatui.App` that renders widgets exactly as it would in a terminal, so build and try it there first.
 
-1. **Pick the format and scale.** `Mono` for 1-bit panels, `RGB565` or `XRGB8888` for colour. `scale:` magnifies the built-in 6×8 font so the grid stays readable on a large panel: a 720×1280 display at scale 3 gives 40×53 cells.
-2. **Write the surface.** `init/1` opens the device and returns its geometry, `push/2` writes the rectangles that changed. On a Linux framebuffer (a Raspberry Pi with a display) the helpers do both:
+**A Linux framebuffer** (a Raspberry Pi with a display, on Nerves) is one module and a child in the supervision tree:
 
-   ```elixir
-   defmodule MyDevice.Surface do
-     use RasterExRatatui.Surface, app: MyDevice.App, scale: 3
+```elixir
+defmodule MyDevice.Surface do
+  use RasterExRatatui.Framebuffer.Surface, app: MyDevice.App, rotate: 90
+end
+```
 
-     alias RasterExRatatui.Framebuffer
+It waits for `/dev/fb0`, reads the panel's size and depth from sysfs, picks the pixel format and a font scale, keeps the kernel console off the display, reads the first USB keyboard (with [`input_event`](https://hex.pm/packages/input_event) in the deps), and restarts the app when it quits. Every default is an option or an override; [Linux Framebuffers](guides/framebuffer.md) has the details.
 
-     @impl true
-     def init(_opts) do
-       {:ok, fb} = Framebuffer.open("fb0")
-       {:ok, format} = Framebuffer.format_for(fb.info)
-       {:ok, [size: {fb.info.width, fb.info.height}, format: format], fb}
-     end
+**Any other panel** (an SPI LCD, an e-ink controller) answers three questions in its own surface: how big it is, how its pixels are packed, and how bytes reach it.
 
-     @impl true
-     def push(patches, fb) do
-       :ok = Framebuffer.write(fb, patches)
-       fb
-     end
-   end
-   ```
+```elixir
+defmodule MyDevice.Surface do
+  use RasterExRatatui.Surface, app: MyDevice.App, format: RasterExRatatui.PixelFormat.RGB565
 
-   A panel the kernel does not expose as a framebuffer (an SPI LCD, an e-ink controller) writes each patch with its own driver in `push/2` instead.
-3. **Supervise it and wire input.** Add `MyDevice.Surface` to the supervision tree and the app is on the display. Whatever reads the hardware (a keyboard, GPIO buttons) turns its events into `ExRatatui.Event` structs and hands them over with `RasterExRatatui.Surface.send_event/2`; `RasterExRatatui.Input.Evdev` does the translation for evdev keyboards.
-4. **Test on the host.** A surface whose `push/2` sends patches to the test process drives the real app without a device, and `RasterExRatatui.Raster.frame/1` shows exactly what the panel would.
+  @impl true
+  def init(_opts), do: {:ok, [size: {480, 320}], MyDevice.LCD.open!()}
 
-[Building a Surface](guides/surfaces.md) walks through each step, including panels that only take whole frames, slow refreshes, crashes, and resizing. [Linux Framebuffers](guides/framebuffer.md) covers `/dev/fb0`, keeping the kernel console off the display, and keyboards. A device already driven from its own process starts a `RasterExRatatui.Session` there instead: the same app server, raster, and folding of renders, with no second process.
+  @impl true
+  def push(patches, lcd) do
+    Enum.each(patches, &MyDevice.LCD.write(lcd, &1.x, &1.y, &1.width, &1.height, &1.data))
+    lcd
+  end
+end
+```
+
+Input is whatever reads the hardware, turned into `ExRatatui.Event` structs and handed to `RasterExRatatui.Surface.send_event/2`. [Building a Surface](guides/surfaces.md) covers whole-frame panels, slow refreshes, crashes, rotation, and testing on the host. A device already driven from its own process starts a `RasterExRatatui.Session` there instead of a surface.
 
 ## Examples
 
