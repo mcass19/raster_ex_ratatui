@@ -72,7 +72,7 @@ frame = RasterExRatatui.Raster.frame(raster)
 - `Raster` is an immutable value: keep the struct `apply/2` returns, or the next diff is folded into a stale grid.
 - Feed **every** diff to `apply/2`, in order, even when not pushing; diffs are deltas.
 - `:scale` is a positive integer; the effective cell is font cell × scale.
-- `rotate: 90 | 180 | 270` turns the app's image clockwise on the panel. `:size` is **always the physical panel**; the grid, `logical_size/1`, and `margin/1` follow the turned image, while patches, `frame/1`, and `resize/2` stay physical. Never swap `:size` by hand to rotate.
+- `rotate: 90 | 180 | 270` turns the app's image clockwise on the panel. `:size` is **always the physical panel**; the grid, `logical_size/1`, and `margin/1` follow the turned image, while patches, `frame/1`, and `resize/2` stay physical. Never swap `:size` by hand to rotate. `cell_at(raster, {px, py})` maps a panel pixel (a touch point) back to `{col, row}` or `:outside`, whatever the rotation.
 - `new/1` raises `ArgumentError` (never `KeyError`) for a missing `:size` or `:format`, a `:size` that is not two positive integers, a bad `:scale`, or a panel too small for one cell.
 
 ## Formats and palettes

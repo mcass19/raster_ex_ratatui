@@ -667,6 +667,59 @@ defmodule RasterExRatatui.RasterTest do
                binary_part(Raster.frame(flat), 0, 24 * 12)
     end
 
+    property "cell_at/2 maps every pixel of a cell's rect back to it, and only those" do
+      check all(
+              scale <- integer(1..2),
+              rotate <- member_of([0, 90, 180, 270]),
+              cols <- integer(1..4),
+              rows <- integer(1..3),
+              right <- integer(0..5),
+              bottom <- integer(0..7)
+            ) do
+        logical = {cols * 6 * scale + right, rows * 8 * scale + bottom}
+        {lw, lh} = logical
+        size = if rotate in [90, 270], do: {lh, lw}, else: logical
+        raster = mono(size, scale: scale, rotate: rotate)
+        {width, height} = Raster.size(raster)
+        {cell_w, cell_h} = Raster.font_size(raster)
+        assert Raster.grid_size(raster) == {cols, rows}
+
+        # Every cell's four corners, mapped to the panel by the moduledoc's
+        # corner mapping, come back as that cell.
+        for col <- 0..(cols - 1), row <- 0..(rows - 1) do
+          {x0, y0} = {col * cell_w, row * cell_h}
+
+          for {x, y} <- [
+                {x0, y0},
+                {x0 + cell_w - 1, y0},
+                {x0, y0 + cell_h - 1},
+                {x0 + cell_w - 1, y0 + cell_h - 1}
+              ] do
+            point =
+              case rotate do
+                0 -> {x, y}
+                90 -> {width - 1 - y, x}
+                180 -> {width - 1 - x, height - 1 - y}
+                270 -> {y, height - 1 - x}
+              end
+
+            assert Raster.cell_at(raster, point) == {col, row}
+          end
+        end
+
+        # Counting every panel pixel: each cell gets exactly its area, the
+        # margins are outside, and nothing else exists.
+        counts =
+          Enum.frequencies(
+            for x <- 0..(width - 1), y <- 0..(height - 1), do: Raster.cell_at(raster, {x, y})
+          )
+
+        assert Map.get(counts, :outside, 0) == width * height - cols * rows * cell_w * cell_h
+        assert Enum.all?(Map.delete(counts, :outside), fn {_cell, n} -> n == cell_w * cell_h end)
+        assert map_size(counts) - if(right + bottom > 0, do: 1, else: 0) == cols * rows
+      end
+    end
+
     test "a real session's Viewport3D region lands turned with the cells" do
       {flat, turned} = pair(XRGB8888, 90, {73, 66})
       session = session(flat)

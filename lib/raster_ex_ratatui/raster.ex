@@ -275,6 +275,58 @@ defmodule RasterExRatatui.Raster do
   end
 
   @doc """
+  The cell under a physical pixel, `{col, row}`, or `:outside` for a pixel in the margins or off the panel.
+
+  The inverse of the rotation mapping in the moduledoc: what a touch controller, which reports the panel's own coordinates, needs to find the cell the app sees under a finger.
+
+  ## Examples
+
+  A 12×16 panel with the 6×8 font: two columns and two rows flat, two columns and one row turned.
+
+      iex> alias RasterExRatatui.{Raster, PixelFormat}
+      iex> flat = Raster.new(size: {12, 16}, format: PixelFormat.Mono)
+      iex> {Raster.cell_at(flat, {7, 9}), Raster.cell_at(flat, {12, 0}), Raster.cell_at(flat, {-1, 0})}
+      {{1, 1}, :outside, :outside}
+
+      iex> alias RasterExRatatui.{Raster, PixelFormat}
+      iex> at = fn angle, point -> Raster.cell_at(Raster.new(size: {12, 16}, format: PixelFormat.Mono, rotate: angle), point) end
+      iex> {at.(90, {5, 10}), at.(180, {7, 9}), at.(270, {5, 10})}
+      {{1, 0}, {0, 0}, {0, 0}}
+
+  Turned by 90, the app's 4-pixel right margin is at the bottom of the panel and its bottom margin on the panel's left:
+
+      iex> alias RasterExRatatui.{Raster, PixelFormat}
+      iex> turned = Raster.new(size: {12, 16}, format: PixelFormat.Mono, rotate: 90)
+      iex> {Raster.cell_at(turned, {4, 11}), Raster.cell_at(turned, {4, 12}), Raster.cell_at(turned, {3, 11})}
+      {{1, 0}, :outside, :outside}
+  """
+  @spec cell_at(t(), {integer(), integer()}) ::
+          {non_neg_integer(), non_neg_integer()} | :outside
+  def cell_at(%__MODULE__{} = raster, {px, py}) when is_integer(px) and is_integer(py) do
+    {width, height} = raster.size
+
+    if px >= 0 and py >= 0 and px < width and py < height do
+      {x, y} = logical_point(raster, px, py)
+      {cell_w, cell_h} = raster.cell_size
+      {cols, rows} = raster.grid_size
+      {col, row} = {div(x, cell_w), div(y, cell_h)}
+
+      if col < cols and row < rows, do: {col, row}, else: :outside
+    else
+      :outside
+    end
+  end
+
+  # The app's pixel under a panel pixel: the corner mapping run backwards.
+  defp logical_point(%__MODULE__{rotate: 0}, px, py), do: {px, py}
+  defp logical_point(%__MODULE__{rotate: 90, size: {pw, _ph}}, px, py), do: {py, pw - 1 - px}
+
+  defp logical_point(%__MODULE__{rotate: 180, size: {pw, ph}}, px, py),
+    do: {pw - 1 - px, ph - 1 - py}
+
+  defp logical_point(%__MODULE__{rotate: 270, size: {_pw, ph}}, px, py), do: {ph - 1 - py, px}
+
+  @doc """
   Bytes per packed pixel, from the format.
 
   ## Examples
