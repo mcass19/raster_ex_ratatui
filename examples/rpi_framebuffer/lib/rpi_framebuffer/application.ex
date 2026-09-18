@@ -17,6 +17,9 @@ defmodule RpiFramebuffer.Application do
   # A surface is :transient by default, so an app that quits stays stopped. On
   # a panel with nothing else to show, quitting restarts the dashboard instead.
   def children({:ok, opts}) do
+    # Registered under its module name, so IEx can reach it:
+    # RasterExRatatui.Telemetry.probe(RpiFramebuffer.Surface, 10)
+    opts = Keyword.put_new(opts, :name, RpiFramebuffer.Surface)
     [Supervisor.child_spec({RpiFramebuffer.Surface, opts}, restart: :permanent)]
   end
 

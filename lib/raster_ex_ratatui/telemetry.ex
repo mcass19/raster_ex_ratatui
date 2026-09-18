@@ -100,6 +100,98 @@ defmodule RasterExRatatui.Telemetry do
     :telemetry.detach(handler_id())
   end
 
+  @doc """
+  Watches one surface for `seconds` and reports how it keeps up: for the raster and push spans, how many ran, and their median, 90th percentile, and slowest duration in milliseconds, plus the surface's mailbox length before and after. Meant for an IEx session on the device.
+
+      RasterExRatatui.Telemetry.probe(MyDevice.Surface, 10)
+      raster: n=56 in 10s  median=42.6ms  p90=65.0ms  max=70.8ms
+      push:   n=56 in 10s  median=12.8ms  p90=15.2ms  max=27.2ms
+      surface mailbox: 0 -> 0
+
+  Reading it: `raster` is the cost of turning renders into pixels and `push` the cost of the device write, so their sum bounds the frame rate; a raster count well below the app's render rate means renders were folded together (see `[:raster_ex_ratatui, :frame, :raster]`'s `:diffs`); a mailbox that grows during the probe means the surface is falling behind.
+
+  Returns the same figures as a map, `%{raster: stats | nil, push: stats | nil, mailbox: {before, after}}`, where stats is `%{n:, median:, p90:, max:}` in milliseconds. Pass `print: false` to skip the report.
+  """
+  @spec probe(GenServer.server(), number(), keyword()) :: %{
+          raster: map() | nil,
+          push: map() | nil,
+          mailbox: {non_neg_integer(), non_neg_integer()}
+        }
+  def probe(surface, seconds \\ 10, opts \\ []) when is_number(seconds) and seconds > 0 do
+    pid = GenServer.whereis(surface) || raise ArgumentError, "no surface at #{inspect(surface)}"
+    id = "raster-ex-ratatui-probe-#{System.unique_integer([:positive])}"
+
+    events = [
+      [:raster_ex_ratatui, :frame, :raster, :stop],
+      [:raster_ex_ratatui, :frame, :push, :stop]
+    ]
+
+    :telemetry.attach_many(id, events, &__MODULE__.__probe_handler__/4, {self(), pid, id})
+    before = mailbox(pid)
+    Process.sleep(round(seconds * 1000))
+    :telemetry.detach(id)
+
+    samples = id |> probe_samples([]) |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+
+    report = %{
+      raster: stats(samples[:raster]),
+      push: stats(samples[:push]),
+      mailbox: {before, mailbox(pid)}
+    }
+
+    if Keyword.get(opts, :print, true), do: print_probe(report, seconds)
+    report
+  end
+
+  @doc false
+  def __probe_handler__([_, _, kind, _], %{duration: duration}, %{pid: pid}, {to, pid, id}) do
+    ms = System.convert_time_unit(duration, :native, :microsecond) / 1000
+    send(to, {id, kind, ms})
+  end
+
+  def __probe_handler__(_event, _measurements, _meta, _config), do: :ok
+
+  defp probe_samples(id, acc) do
+    receive do
+      {^id, kind, ms} -> probe_samples(id, [{kind, ms} | acc])
+    after
+      0 -> acc
+    end
+  end
+
+  defp stats(nil), do: nil
+
+  defp stats(samples) do
+    sorted = Enum.sort(samples)
+    n = length(sorted)
+    at = fn q -> sorted |> Enum.at(min(round(q * n), n - 1)) |> Float.round(1) end
+    %{n: n, median: at.(0.5), p90: at.(0.9), max: Float.round(List.last(sorted), 1)}
+  end
+
+  defp print_probe(report, seconds) do
+    for {kind, label} <- [raster: "raster:", push: "push:  "] do
+      case report[kind] do
+        nil ->
+          IO.puts("#{label} n=0 in #{seconds}s")
+
+        s ->
+          IO.puts(
+            "#{label} n=#{s.n} in #{seconds}s  median=#{s.median}ms  p90=#{s.p90}ms  max=#{s.max}ms"
+          )
+      end
+    end
+
+    {before, after_probe} = report.mailbox
+    IO.puts("surface mailbox: #{before} -> #{after_probe}")
+  end
+
+  defp mailbox(pid) do
+    case Process.info(pid, :message_queue_len) do
+      {:message_queue_len, n} -> n
+      nil -> 0
+    end
+  end
+
   @doc false
   def __default_logger_handler__(event, measurements, metadata, %{level: level}) do
     Logger.log(level, fn ->

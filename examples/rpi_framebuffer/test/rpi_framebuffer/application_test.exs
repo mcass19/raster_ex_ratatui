@@ -13,6 +13,7 @@ defmodule RpiFramebuffer.ApplicationTest do
     assert [%{id: RpiFramebuffer.Surface, restart: :permanent, start: start}] =
              App.children({:ok, [scale: 3]})
 
-    assert start == {RpiFramebuffer.Surface, :start_link, [[scale: 3]]}
+    assert start ==
+             {RpiFramebuffer.Surface, :start_link, [[name: RpiFramebuffer.Surface, scale: 3]]}
   end
 end

@@ -22,6 +22,19 @@ RasterExRatatui.Telemetry.attach_default_logger(level: :info)
 
 Detach with `RasterExRatatui.Telemetry.detach_default_logger/0`.
 
+## Is the panel keeping up?
+
+`RasterExRatatui.Telemetry.probe/3` watches one surface for a few seconds and prints the answer, from an IEx session on the device:
+
+```elixir
+iex> RasterExRatatui.Telemetry.probe(MyDevice.Surface, 10)
+raster: n=56 in 10s  median=42.6ms  p90=65.0ms  max=70.8ms
+push:   n=56 in 10s  median=12.8ms  p90=15.2ms  max=27.2ms
+surface mailbox: 0 -> 0
+```
+
+`raster` is what turning renders into pixels costs and `push` what the device write costs; together they bound the frame rate. A raster count well below the app's render rate means renders were folded together (a `Viewport3D` that turns faster than the panel can show), and a mailbox that grows during the probe means the surface is falling behind. The numbers above are a Raspberry Pi 4 driving a 720×1280 panel at RGB565 with a 696×480 pixel region turning five times a second.
+
 ## Wiring `Telemetry.Metrics`
 
 ```elixir
