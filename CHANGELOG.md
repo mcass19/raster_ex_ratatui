@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `examples/rpi_framebuffer`: a Nerves project that runs a `RasterExRatatui.Surface` on a Raspberry Pi's `/dev/fb0` with a USB keyboard. The panel's size, pixel format, and font scale are read from sysfs, so the same firmware fits the DSI Touch Display 2 and an HDMI monitor. The app is a two-tab dashboard (pixel regions, keyboard test) that also runs in a terminal.
+- `examples/rpi_framebuffer`: a Nerves project that puts a dashboard on a Raspberry Pi's `/dev/fb0` with a USB keyboard, through one `use RasterExRatatui.Framebuffer.Surface`. The panel's size, pixel format, and font scale are read from sysfs, so the same firmware fits the DSI Touch Display 2 (turned landscape with `rotate:`) and an HDMI monitor. The app is a two-tab dashboard (pixel regions, keyboard test) that reads its cell size from the `surface:` option and also runs in a terminal.
 - `examples/e_ink`: a walk through the e-ink name badge, the consumer that uses the pure core from its own screen process instead of a surface.
 - `RasterExRatatui.Raster.apply/2` takes a list of payloads and rasterises them as one: the grid is folded through all of them first, so a cell or region that changed several times is drawn once, in its final state. The patches are those of the last state only.
 

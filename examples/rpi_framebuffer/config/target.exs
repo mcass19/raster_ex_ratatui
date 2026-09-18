@@ -3,14 +3,18 @@ import Config
 # The panel as a surface. This entry is what makes the application start
 # `RpiFramebuffer.Surface` (the host has none and runs the dashboard in a
 # terminal instead). Nothing here describes the panel: its size and depth are
-# read from sysfs at boot. Optional keys:
+# read from sysfs at boot. The keys are RasterExRatatui.Framebuffer.Surface's:
 #
-#   * `scale:` - integer font scale; the default is derived from the panel size
-#   * `framebuffer:` - default "fb0"
-#   * `framebuffer_timeout:` - milliseconds to wait for the framebuffer at boot, default 30_000
-#   * `console:` - the framebuffer console to unbind, default "vtcon1"
-#   * `keyboard:` - false to skip looking for a USB keyboard
-config :rpi_framebuffer, RpiFramebuffer.Surface, []
+#   * `rotate:` - 0, 90, 180, or 270, clockwise: how the stand holds the panel.
+#     The Touch Display 2 is portrait; 90 or 270 makes it landscape, whichever
+#     puts the text the right way up
+#   * `scale:` - integer font scale, default :auto (about 100 columns on the long side)
+#   * `framebuffer:` - default "fb0"; `framebuffer_timeout:` - default 30_000 ms
+#   * `console:` - the framebuffer console to unbind, default "vtcon1", or false
+#   * `keyboard:` - true (default), a /dev/input/eventN path, or false
+#   * `touch:` - the touch panel, the same way (default false)
+#   * `app_opts:` - for the dashboard: `spin_ms:` between two turns of the object
+config :rpi_framebuffer, RpiFramebuffer.Surface, rotate: 90
 
 # Use Ringlogger as the logger backend and remove :console.
 config :logger, backends: [RingLogger]

@@ -2,7 +2,7 @@
 
 A Nerves project that puts an ExRatatui dashboard on a Raspberry Pi's display through `/dev/fb0`, with a USB keyboard. The first hardware is a Raspberry Pi 4 with the official Touch Display 2 (7", DSI, 720×1280), but nothing in the project describes a panel: size and depth are read from sysfs at boot, so an HDMI monitor or another Pi works with the same firmware.
 
-It is the example for the **surface process**: `RpiFramebuffer.Surface` is a `RasterExRatatui.Surface` under a supervisor. For a device that keeps its own screen process and uses the pure core instead, see [`e_ink`](../e_ink).
+It is the example for the **framebuffer surface**: `RpiFramebuffer.Surface` is one `use RasterExRatatui.Framebuffer.Surface` under a supervisor. For a device that keeps its own screen process, see [`e_ink`](../e_ink).
 
 > **Status:** runs on a Raspberry Pi 4 with the Touch Display 2 (Nerves system 2.0.1, ex_ratatui 0.14.1). The dashboard comes up in portrait about twenty seconds after power, with no console or cursor over it, the keyboard is found at boot, and `ctrl+q` restarts the dashboard. With the Showcase tab turning its object five times a second, a frame costs about 43 ms to rasterise and 13 ms to write, and the surface keeps up. Tests run on the host against a fake sysfs and a file standing in for `/dev/fb0`.
 
@@ -38,14 +38,11 @@ runs the whole project on the host, surface included.
 
 ## How the surface works
 
-`lib/rpi_framebuffer/surface.ex` is short; the library does the rest.
+```elixir
+defmodule RpiFramebuffer.Surface do
+  use RasterExRatatui.Framebuffer.Surface, app: RpiFramebuffer.Dashboard
+end
+```
 
-1. `init/1` opens the framebuffer with `RasterExRatatui.Framebuffer.open/2`, which also reads `virtual_size`, `bits_per_pixel`, and `stride` from `/sys/class/graphics/fb0`. The display drivers are kernel modules that load during boot, so the device can appear seconds after the application starts: the surface keeps trying for `framebuffer_timeout:` (30 seconds by default) before giving up.
-2. `Framebuffer.format_for/1` picks the pixel format from the depth: `RGB565` at 16 bits per pixel (what the KMS fbdev emulation gives the Touch Display 2), `XRGB8888` at 32.
-3. The font scale defaults to the largest integer that keeps at least 100 columns on the panel's long side: 2 on 720×1280 (12×16 pixel cells), 3 at 1080p (18×24). `scale:` in the config overrides it.
-4. `Framebuffer.unbind_console/2` detaches the kernel's framebuffer console, best effort.
-5. `push/2` hands the patches to `Framebuffer.write/2`: one positioned write per patch row, never past the end of the device.
-6. The keyboard is the first input device that reports letter keys, read through [`input_event`](https://hex.pm/packages/input_event) with `grab: true`. `RasterExRatatui.Input.Evdev` turns its events into `%ExRatatui.Event.Key{}` structs, and the surface returns them as `{:events, keys, state}`. A missing or unplugged keyboard is looked for again every two seconds.
-
-Options go in `config :rpi_framebuffer, RpiFramebuffer.Surface, [...]`: `scale:`, `framebuffer:` (default `"fb0"`), `framebuffer_timeout:` (default `30_000` ms), `console:` (default `"vtcon1"`), `keyboard:` (default `true`), and `spin_ms:` (default `200`), the interval between two turns of the 3D object.
+The library waits for `/dev/fb0`, reads its size and depth from sysfs, picks the pixel format and a font scale, detaches the kernel console, reads the first USB keyboard through [`input_event`](https://hex.pm/packages/input_event) (and again after an unplug), writes each patch at its offset, and restarts the dashboard when it quits. `config/target.exs` sets `rotate:` for the stand and the rest of the options; the dashboard reads its cell size from the `surface:` option it is mounted with, so the same layout holds on any panel.
 

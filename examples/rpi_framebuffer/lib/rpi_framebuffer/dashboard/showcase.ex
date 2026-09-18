@@ -81,6 +81,7 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
       angle: 0.0,
       paused?: false,
       spin_ms: Keyword.get(opts, :spin_ms, @spin_ms),
+      cell_size: Tab.cell_size(opts),
       photos: photos,
       photo: 0,
       stats: sample(),
@@ -150,7 +151,7 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
   @impl Tab
   def render(state, area) do
     [panes, beam] = Layout.split(area, :vertical, [{:fill, 1}, {:length, 13}])
-    direction = if Tab.landscape?(panes), do: :horizontal, else: :vertical
+    direction = if Tab.landscape?(panes, state.cell_size), do: :horizontal, else: :vertical
     [first, second] = Layout.split(panes, direction, [{:fill, 1}, {:fill, 1}])
     {image, author} = Enum.at(state.photos, state.photo)
 
@@ -164,25 +165,25 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
       {pane(" 3D #{state.shape} ", :light_cyan), first},
       {viewport, Tab.inner(first)},
       {pane(" #{author} / Unsplash ", :light_yellow), second},
-      {image, second |> Tab.inner() |> photo_rect()}
+      {image, second |> Tab.inner() |> photo_rect(state.cell_size)}
     ] ++ beam_widgets(state, beam)
   end
 
   @doc """
-  The largest centred rect inside `area` with the photos' 4:3 shape. A cell of the library font is 6×8 pixels, so 4:3 in pixels is 16:9 in cells. The image widget anchors a fitted picture to the top left; handing it a rect of its own shape centres it.
+  The largest centred rect inside `area` with the photos' 4:3 shape, given the cell size in pixels (with 6×8 cells, 4:3 in pixels is 16:9 in cells). The image widget anchors a fitted picture to the top left; handing it a rect of its own shape centres it.
 
   ## Examples
 
-      iex> RpiFramebuffer.Dashboard.Showcase.photo_rect(%ExRatatui.Layout.Rect{x: 1, y: 40, width: 58, height: 30})
+      iex> RpiFramebuffer.Dashboard.Showcase.photo_rect(%ExRatatui.Layout.Rect{x: 1, y: 40, width: 58, height: 30}, {6, 8})
       %ExRatatui.Layout.Rect{x: 3, y: 40, width: 53, height: 30}
 
-      iex> RpiFramebuffer.Dashboard.Showcase.photo_rect(%ExRatatui.Layout.Rect{x: 0, y: 0, width: 32, height: 30})
+      iex> RpiFramebuffer.Dashboard.Showcase.photo_rect(%ExRatatui.Layout.Rect{x: 0, y: 0, width: 32, height: 30}, {6, 8})
       %ExRatatui.Layout.Rect{x: 0, y: 6, width: 32, height: 18}
   """
-  @spec photo_rect(Rect.t()) :: Rect.t()
-  def photo_rect(%Rect{width: width, height: height} = area) do
-    rows = min(height, div(width * 9, 16))
-    cols = min(width, div(rows * 16, 9))
+  @spec photo_rect(Rect.t(), {pos_integer(), pos_integer()}) :: Rect.t()
+  def photo_rect(%Rect{width: width, height: height} = area, {cell_w, cell_h}) do
+    rows = min(height, div(width * cell_w * 3, cell_h * 4))
+    cols = min(width, div(rows * cell_h * 4, cell_w * 3))
 
     %Rect{
       x: area.x + div(width - cols, 2),

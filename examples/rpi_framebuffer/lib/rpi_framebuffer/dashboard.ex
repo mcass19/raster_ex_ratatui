@@ -27,7 +27,7 @@ defmodule RpiFramebuffer.Dashboard do
 
   ## Options
 
-  Every option is handed to every tab: see `RpiFramebuffer.Dashboard.Showcase` (`:spin_ms`).
+  Every option is handed to every tab: `:spin_ms` (see `RpiFramebuffer.Dashboard.Showcase`) and, on a panel, the `surface:` map a `RasterExRatatui` surface adds, with the cell size the layouts use (`RpiFramebuffer.Dashboard.Tab.cell_size/1`).
   """
 
   use ExRatatui.App, runtime: :reducer

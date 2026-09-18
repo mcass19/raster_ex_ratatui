@@ -9,11 +9,8 @@ defmodule RpiFramebuffer.ApplicationTest do
     assert Supervisor.which_children(RpiFramebuffer.Supervisor) == []
   end
 
-  test "starts the configured surface and restarts it when the dashboard quits" do
-    assert [%{id: RpiFramebuffer.Surface, restart: :permanent, start: start}] =
-             App.children({:ok, [scale: 3]})
-
-    assert start ==
-             {RpiFramebuffer.Surface, :start_link, [[name: RpiFramebuffer.Surface, scale: 3]]}
+  test "starts the configured surface under its module name" do
+    assert App.children({:ok, [rotate: 90]}) ==
+             [{RpiFramebuffer.Surface, [name: RpiFramebuffer.Surface, rotate: 90]}]
   end
 end

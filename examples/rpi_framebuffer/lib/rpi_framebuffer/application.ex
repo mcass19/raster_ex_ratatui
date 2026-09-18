@@ -13,14 +13,10 @@ defmodule RpiFramebuffer.Application do
   @doc false
   # `config/target.exs` configures the surface; the host has no framebuffer to
   # own and runs the dashboard in a terminal via RpiFramebuffer.run/0.
-  #
-  # A surface is :transient by default, so an app that quits stays stopped. On
-  # a panel with nothing else to show, quitting restarts the dashboard instead.
   def children({:ok, opts}) do
     # Registered under its module name, so IEx can reach it:
     # RasterExRatatui.Telemetry.probe(RpiFramebuffer.Surface, 10)
-    opts = Keyword.put_new(opts, :name, RpiFramebuffer.Surface)
-    [Supervisor.child_spec({RpiFramebuffer.Surface, opts}, restart: :permanent)]
+    [{RpiFramebuffer.Surface, Keyword.put_new(opts, :name, RpiFramebuffer.Surface)}]
   end
 
   def children(:error), do: []

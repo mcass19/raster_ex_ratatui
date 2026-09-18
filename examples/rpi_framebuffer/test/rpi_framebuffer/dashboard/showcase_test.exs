@@ -101,6 +101,17 @@ defmodule RpiFramebuffer.Dashboard.ShowcaseTest do
       assert {%Image{}, %Rect{x: 56, y: 4, width: 46, height: 26}} = find(widgets, Image)
     end
 
+    test "lays out for the cell size the surface reports" do
+      # Tall cells: a 60×40 grid is 240×640 pixels, a portrait panel.
+      state = Showcase.init(surface: %{cell_size: {4, 16}})
+      assert state.cell_size == {4, 16}
+
+      widgets = Showcase.render(state, %Rect{x: 0, y: 3, width: 60, height: 40})
+      assert {%Viewport3D{}, %Rect{x: 1, y: 4, width: 58}} = find(widgets, Viewport3D)
+      assert {%Image{}, %Rect{} = image} = find(widgets, Image)
+      assert image.y > 14
+    end
+
     test "stacks the panes on a portrait grid", %{state: state} do
       widgets = Showcase.render(state, %Rect{x: 0, y: 3, width: 60, height: 76})
 

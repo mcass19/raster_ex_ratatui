@@ -64,18 +64,38 @@ defmodule RpiFramebuffer.Dashboard.Tab do
   end
 
   @doc """
-  Whether `area` is wider than tall on the panel. A cell of the library font is 6×8 pixels, so an area is landscape when its columns × 6 exceed its rows × 8.
+  Whether `area` is wider than tall on the panel, given the cell size in pixels (`cell_size` in the `surface:` option a surface gives the app; 6×8 in a terminal).
 
   ## Examples
 
-      iex> RpiFramebuffer.Dashboard.Tab.landscape?(%ExRatatui.Layout.Rect{width: 106, height: 41})
+      iex> RpiFramebuffer.Dashboard.Tab.landscape?(%ExRatatui.Layout.Rect{width: 106, height: 41}, {6, 8})
       true
 
-      iex> RpiFramebuffer.Dashboard.Tab.landscape?(%ExRatatui.Layout.Rect{width: 60, height: 76})
+      iex> RpiFramebuffer.Dashboard.Tab.landscape?(%ExRatatui.Layout.Rect{width: 60, height: 76}, {6, 8})
       false
   """
-  @spec landscape?(Rect.t()) :: boolean()
-  def landscape?(%Rect{width: width, height: height}), do: width * 6 > height * 8
+  @spec landscape?(Rect.t(), {pos_integer(), pos_integer()}) :: boolean()
+  def landscape?(%Rect{width: width, height: height}, {cell_w, cell_h}),
+    do: width * cell_w > height * cell_h
+
+  @doc """
+  The cell size in pixels from an app's options: the `surface:` a `RasterExRatatui` surface adds, or the library font's 6×8 in a terminal.
+
+  ## Examples
+
+      iex> RpiFramebuffer.Dashboard.Tab.cell_size(surface: %{cell_size: {12, 16}})
+      {12, 16}
+
+      iex> RpiFramebuffer.Dashboard.Tab.cell_size([])
+      {6, 8}
+  """
+  @spec cell_size(keyword()) :: {pos_integer(), pos_integer()}
+  def cell_size(opts) do
+    case Keyword.get(opts, :surface) do
+      %{cell_size: cell_size} -> cell_size
+      _none -> {6, 8}
+    end
+  end
 
   @doc """
   Appends `value` to `history`, keeping the last `limit` entries.
