@@ -2,7 +2,7 @@ defmodule RasterExRatatui.Input.Devices do
   @moduledoc """
   Finds and reads the evdev input devices a panel comes with, and finds them again when they go away.
 
-  A keyboard on a Nerves device is `/dev/input/eventN` for some N that changes with what else is plugged in, may not exist at boot, and goes away when unplugged. This module owns that: which device to read, starting an `input_event` reader on it with the device grabbed (so keystrokes do not also reach the kernel console), translating what it delivers into `ExRatatui.Event` structs, and looking again, every `retry_ms:`, whenever there is nothing to read. It has no process of its own: the caller keeps the struct, hands it every message it receives, and gets events back, from a surface's `c:RasterExRatatui.Surface.handle_info/2` or from any process that traps exits.
+  A keyboard on a Nerves device is `/dev/input/eventN` for some N that changes with what else is plugged in, may not exist at boot, and goes away when unplugged; a touch panel is another such device. This module owns both: which device to read, starting an `input_event` reader on it with the device grabbed (so keystrokes do not also reach the kernel console), translating what it delivers into `ExRatatui.Event` structs (`RasterExRatatui.Input.Evdev` for keys, `RasterExRatatui.Input.Touch` for fingers), and looking again, every `retry_ms:`, whenever there is nothing to read. It has no process of its own: the caller keeps the struct, hands it every message it receives, and gets events back, from a surface's `c:RasterExRatatui.Surface.handle_info/2` or from any process that traps exits.
 
       defmodule Kiosk.Surface do
         use RasterExRatatui.Surface, app: Kiosk.Dashboard, format: RasterExRatatui.PixelFormat.RGB565
@@ -40,7 +40,10 @@ defmodule RasterExRatatui.Input.Devices do
   `new/1` takes:
 
     * `:keyboard` — `true` (default) to read the first device that reports letter keys, a `"/dev/input/eventN"` path to read that one, or `false`
-    * `:touch` — `true`, a path, or `false` (default). Accepted now, read from the next release on
+    * `:touch` — `true` to read the first touch panel found (`touch_path/1`), a path, or `false` (default). Its taps and drags come back as `ExRatatui.Event.Mouse` events on the cell under the finger, which takes the two options below
+    * `:size` — the physical panel in pixels, for the touch axes (required with `:touch`)
+    * `:cell_at` — `({px, py} -> {col, row} | :outside)`, normally `RasterExRatatui.Raster.cell_at/2` of the raster the panel shows (required with `:touch`)
+    * `:swap_xy`, `:invert_x`, `:invert_y` — for a touch controller that does not follow the panel's orientation, see `RasterExRatatui.Input.Touch`
     * `:retry_ms` — how long to wait before looking for a missing device again (default `2_000`)
     * `:input` — the module standing in for `InputEvent` (default `InputEvent`)
     * `:layout`, `:emit_release` — passed to `RasterExRatatui.Input.Evdev.new/1`
@@ -52,7 +55,7 @@ defmodule RasterExRatatui.Input.Devices do
 
   require Logger
 
-  alias RasterExRatatui.Input.Evdev
+  alias RasterExRatatui.Input.{Evdev, Touch}
 
   @type device :: {path :: String.t(), %{report_info: [{atom(), [term()]}]}}
 
@@ -62,9 +65,13 @@ defmodule RasterExRatatui.Input.Devices do
           touch: boolean() | String.t(),
           retry_ms: non_neg_integer(),
           evdev_opts: keyword(),
+          touch_opts: keyword(),
           keyboard_path: String.t() | nil,
           keyboard_reader: pid() | nil,
           evdev: Evdev.t(),
+          touch_path: String.t() | nil,
+          touch_reader: pid() | nil,
+          touch_state: Touch.t() | nil,
           timer: reference() | nil
         }
 
@@ -73,13 +80,19 @@ defmodule RasterExRatatui.Input.Devices do
             touch: false,
             retry_ms: 2_000,
             evdev_opts: [],
+            touch_opts: [],
             keyboard_path: nil,
             keyboard_reader: nil,
             evdev: nil,
+            touch_path: nil,
+            touch_reader: nil,
+            touch_state: nil,
             timer: nil
 
+  @touch_keys [:size, :cell_at, :swap_xy, :invert_x, :invert_y]
+
   @doc """
-  Builds the state from the options in the moduledoc. Raises `ArgumentError` on a bad option.
+  Builds the state from the options in the moduledoc. Raises `ArgumentError` on a bad option, or on `:touch` without `:size` and `:cell_at`.
 
   ## Examples
 
@@ -99,6 +112,13 @@ defmodule RasterExRatatui.Input.Devices do
     validate!(:retry_ms, retry_ms, is_integer(retry_ms) and retry_ms >= 0)
     validate!(:input, input, is_atom(input) and not is_nil(input))
 
+    touch_opts = Keyword.take(opts, @touch_keys)
+
+    if touch != false and
+         not (Keyword.has_key?(touch_opts, :size) and Keyword.has_key?(touch_opts, :cell_at)) do
+      raise ArgumentError, "#{inspect(__MODULE__)} needs :size and :cell_at to read a touch panel"
+    end
+
     evdev_opts = Keyword.take(opts, [:layout, :emit_release])
 
     %__MODULE__{
@@ -107,6 +127,7 @@ defmodule RasterExRatatui.Input.Devices do
       touch: touch,
       retry_ms: retry_ms,
       evdev_opts: evdev_opts,
+      touch_opts: touch_opts,
       evdev: Evdev.new(evdev_opts)
     }
   end
@@ -149,10 +170,28 @@ defmodule RasterExRatatui.Input.Devices do
     {:events, keys, %{devices | evdev: evdev}}
   end
 
-  # The reader stops when its device is unplugged; look for one again.
+  def handle_info({:input_event, path, :disconnect}, %__MODULE__{touch_path: path} = devices)
+      when is_binary(path) do
+    Logger.info("#{inspect(__MODULE__)}: the touch panel at #{path} went away")
+    {touch, events} = Touch.translate_all(devices.touch_state, :disconnect)
+    {:events, events, %{devices | touch_state: touch}}
+  end
+
+  def handle_info({:input_event, path, events}, %__MODULE__{touch_path: path} = devices)
+      when is_binary(path) and is_list(events) do
+    {touch, mice} = Touch.translate_all(devices.touch_state, events)
+    {:events, mice, %{devices | touch_state: touch}}
+  end
+
+  # A reader stops when its device is unplugged; look for one again.
   def handle_info({:EXIT, reader, _reason}, %__MODULE__{keyboard_reader: reader} = devices)
       when is_pid(reader) do
     {:noreply, scan(%{devices | keyboard_reader: nil, keyboard_path: nil})}
+  end
+
+  def handle_info({:EXIT, reader, _reason}, %__MODULE__{touch_reader: reader} = devices)
+      when is_pid(reader) do
+    {:noreply, scan(%{devices | touch_reader: nil, touch_path: nil, touch_state: nil})}
   end
 
   def handle_info(_msg, %__MODULE__{}), do: :unknown
@@ -163,16 +202,27 @@ defmodule RasterExRatatui.Input.Devices do
   @spec stop(t()) :: t()
   def stop(%__MODULE__{} = devices) do
     if devices.timer, do: Process.cancel_timer(devices.timer)
+    stop_reader(devices, devices.keyboard_reader)
+    stop_reader(devices, devices.touch_reader)
 
-    if is_pid(devices.keyboard_reader) and Process.alive?(devices.keyboard_reader),
-      do: devices.input.stop(devices.keyboard_reader)
-
-    %{devices | keyboard_reader: nil, keyboard_path: nil, timer: nil}
+    %{
+      devices
+      | keyboard_reader: nil,
+        keyboard_path: nil,
+        touch_reader: nil,
+        touch_path: nil,
+        touch_state: nil,
+        timer: nil
+    }
   end
 
   @doc "The path of the keyboard being read, or `nil` while there is none."
   @spec keyboard(t()) :: String.t() | nil
   def keyboard(%__MODULE__{keyboard_path: path}), do: path
+
+  @doc "The path of the touch panel being read, or `nil` while there is none."
+  @spec touch(t()) :: String.t() | nil
+  def touch(%__MODULE__{touch_path: path}), do: path
 
   @doc """
   The path of the first device in an `InputEvent.enumerate/0` list that reports letter keys, or `nil`. Mice, touch panels, and power buttons report `:ev_key` too, but not `:key_a`.
@@ -241,8 +291,7 @@ defmodule RasterExRatatui.Input.Devices do
       iex> RasterExRatatui.Input.Devices.touch_axes(%{report_info: [ev_key: [:key_a]]})
       nil
   """
-  @spec touch_axes(%{report_info: [{atom(), [term()]}]}) ::
-          %{x: {integer(), integer()}, y: {integer(), integer()}} | nil
+  @spec touch_axes(%{report_info: [{atom(), [term()]}]}) :: Touch.axes() | nil
   def touch_axes(%{report_info: report_info}) do
     axes = Keyword.get(report_info, :ev_abs, [])
 
@@ -265,43 +314,97 @@ defmodule RasterExRatatui.Input.Devices do
 
   # -- scanning --------------------------------------------------------------
 
-  defp scan(%__MODULE__{keyboard: false} = devices), do: devices
-  defp scan(%__MODULE__{keyboard_reader: pid} = devices) when is_pid(pid), do: devices
-
+  # One pass over what is wanted and missing. Enumerating starts a reader per
+  # device, so it happens at most once per scan and only when needed.
   defp scan(%__MODULE__{} = devices) do
-    case keyboard_candidate(devices) do
+    listing =
+      if wants_listing?(devices), do: devices.input.enumerate(), else: []
+
+    devices = devices |> scan_keyboard(listing) |> scan_touch(listing)
+
+    if missing?(devices), do: scan_soon(devices, devices.retry_ms), else: devices
+  end
+
+  defp wants_listing?(%__MODULE__{} = d) do
+    (d.keyboard == true and d.keyboard_reader == nil) or
+      (d.touch != false and d.touch_reader == nil)
+  end
+
+  defp missing?(%__MODULE__{} = d) do
+    (d.keyboard != false and d.keyboard_reader == nil) or
+      (d.touch != false and d.touch_reader == nil)
+  end
+
+  defp scan_keyboard(%__MODULE__{keyboard: false} = devices, _listing), do: devices
+  defp scan_keyboard(%__MODULE__{keyboard_reader: pid} = devices, _) when is_pid(pid), do: devices
+
+  defp scan_keyboard(%__MODULE__{} = devices, listing) do
+    path = if devices.keyboard == true, do: keyboard_path(listing), else: devices.keyboard
+
+    case open(devices, path, "keyboard") do
       nil ->
-        scan_soon(devices, devices.retry_ms)
+        devices
 
-      path ->
-        case devices.input.start_link(path: path, grab: true) do
-          {:ok, reader} ->
-            Logger.info("#{inspect(__MODULE__)}: reading the keyboard at #{path}")
-            # A fresh translator: modifiers held on the old keyboard are gone with it.
-            %{
-              devices
-              | keyboard_reader: reader,
-                keyboard_path: path,
-                evdev: Evdev.new(devices.evdev_opts)
-            }
-
-          {:error, reason} ->
-            Logger.warning("#{inspect(__MODULE__)}: cannot read #{path}: #{inspect(reason)}")
-            scan_soon(devices, devices.retry_ms)
-        end
+      reader ->
+        # A fresh translator: modifiers held on the old keyboard are gone with it.
+        %{
+          devices
+          | keyboard_reader: reader,
+            keyboard_path: path,
+            evdev: Evdev.new(devices.evdev_opts)
+        }
     end
   end
 
-  defp keyboard_candidate(%__MODULE__{keyboard: true} = devices),
-    do: keyboard_path(devices.input.enumerate())
+  defp scan_touch(%__MODULE__{touch: false} = devices, _listing), do: devices
+  defp scan_touch(%__MODULE__{touch_reader: pid} = devices, _) when is_pid(pid), do: devices
 
-  defp keyboard_candidate(%__MODULE__{keyboard: path}) when is_binary(path), do: path
+  defp scan_touch(%__MODULE__{} = devices, listing) do
+    path = if devices.touch == true, do: touch_path(listing), else: devices.touch
+
+    case open(devices, path, "touch panel") do
+      nil ->
+        devices
+
+      reader ->
+        axes =
+          case List.keyfind(listing, path, 0) do
+            {_path, info} -> touch_axes(info)
+            nil -> nil
+          end
+
+        touch_opts =
+          if axes, do: Keyword.put(devices.touch_opts, :axes, axes), else: devices.touch_opts
+
+        %{devices | touch_reader: reader, touch_path: path, touch_state: Touch.new(touch_opts)}
+    end
+  end
+
+  defp open(_devices, nil, _what), do: nil
+
+  defp open(%__MODULE__{input: input}, path, what) do
+    case input.start_link(path: path, grab: true) do
+      {:ok, reader} ->
+        Logger.info("#{inspect(__MODULE__)}: reading the #{what} at #{path}")
+        reader
+
+      {:error, reason} ->
+        Logger.warning("#{inspect(__MODULE__)}: cannot read #{path}: #{inspect(reason)}")
+        nil
+    end
+  end
 
   # At most one scan on its way.
   defp scan_soon(%__MODULE__{timer: nil} = devices, delay),
     do: %{devices | timer: Process.send_after(self(), {__MODULE__, :scan}, delay)}
 
   defp scan_soon(%__MODULE__{} = devices, _delay), do: devices
+
+  defp stop_reader(%__MODULE__{input: input}, reader) when is_pid(reader) do
+    if Process.alive?(reader), do: input.stop(reader)
+  end
+
+  defp stop_reader(_devices, nil), do: :ok
 
   defp letter_keys?({:ev_key, codes}), do: :key_a in codes
   defp letter_keys?(_report), do: false

@@ -16,7 +16,8 @@ defmodule RasterExRatatui.Test.App do
     state = %{
       text: Keyword.get(opts, :text, "hi"),
       cube: Keyword.get(opts, :cube, false),
-      hang_terminate: Keyword.get(opts, :hang_terminate, false)
+      hang_terminate: Keyword.get(opts, :hang_terminate, false),
+      notify: Keyword.get(opts, :notify)
     }
 
     case Keyword.get(opts, :mount_counter) do
@@ -36,6 +37,13 @@ defmodule RasterExRatatui.Test.App do
 
   def update({:event, %Key{code: code}}, state),
     do: {:noreply, %{state | text: state.text <> code}}
+
+  # Mouse events go back to whoever asked to be notified.
+  def update({:event, %ExRatatui.Event.Mouse{} = mouse}, %{notify: pid} = state)
+      when is_pid(pid) do
+    send(pid, {:mouse, mouse})
+    {:noreply, state, render?: false}
+  end
 
   def update(_msg, state), do: {:noreply, state}
 

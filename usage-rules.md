@@ -21,7 +21,8 @@ defmodule MyDevice.Surface do
 end
 ```
 
-- Never hardcode the panel: size and depth come from sysfs, the format from the depth, the scale from the long side (`scale: :auto`). Override with `scale:`, `framebuffer:`, `console:`, `keyboard:`, `rotate:`.
+- Never hardcode the panel: size and depth come from sysfs, the format from the depth, the scale from the long side (`scale: :auto`). Override with `scale:`, `framebuffer:`, `console:`, `keyboard:`, `touch:`, `rotate:`.
+- `touch: true` delivers `%ExRatatui.Event.Mouse{}` events to the app on the cell under the finger, rotation included; handle `"down"`, `"drag"`, `"up"` in the app like terminal mouse events.
 - `on_app_exit` defaults to `:restart` here (a panel has nothing else to show); `push_mode` is `:patches`.
 - To extend, override `init/1`, `push/2`, `handle_info/2`, or `terminate/2` and call `RasterExRatatui.Framebuffer.Surface.<same>/n` from the override. The state is `%{fb:, devices:}` plus whatever the override adds.
 - Add `{:input_event, "~> 1.4"}` to the deps for the keyboard. Without it the surface logs once and runs input-less; do not add `input_event` to a host-only project.
@@ -106,6 +107,7 @@ frame = RasterExRatatui.Raster.frame(raster)
 - `RasterExRatatui.Framebuffer.open(name)` takes the device name (`"fb0"`), not a path. `write/2` accepts patches or `{:frame, binary}` and handles stride.
 - `RasterExRatatui.Input.Devices` finds and reads the keyboard (and, later, the touch panel) through `input_event`: `new/1` + `start/1` in the surface's `init/1`, every message through `handle_info/2` (returns `{:events, keys, devices}`, `{:noreply, devices}`, or `:unknown`), `stop/1` in `terminate/2`. It is process-less and needs the caller to trap exits. The library does not depend on `input_event`; the consumer adds `{:input_event, "~> 1.4"}`, and `start/1` returns `{:error, :input_event_missing}` without it.
 - `RasterExRatatui.Input.Evdev` is the pure translator underneath: keep the returned keyboard struct between calls, since it tracks held modifiers and caps lock.
+- `RasterExRatatui.Input.Touch` is the same for a touch panel: `new(size:, cell_at:, axes:)`, events fold to `%ExRatatui.Event.Mouse{}` (`"down"`, `"drag"`, `"up"`, `button: "left"`) on cells, first finger only. `Devices` with `touch: true` needs `size:` and `cell_at:` (`&Raster.cell_at(raster, &1)`); the framebuffer surface passes both itself. `swap_xy:`/`invert_x:`/`invert_y:` fix a controller that does not follow the panel.
 - A complete framebuffer surface (geometry, format and scale from sysfs, a hot-pluggable evdev keyboard, host tests against a fake sysfs) is the [`rpi_framebuffer`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/rpi_framebuffer) example; start from it rather than from scratch. A device that already owns its display from one process uses `RasterExRatatui.Session` from that process instead, the shape of the [`e_ink`](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/e_ink) example.
 
 ## Testing

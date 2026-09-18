@@ -9,7 +9,7 @@ defmodule RasterExRatatui.Framebuffer.Surface do
       # in the application's supervision tree
       children = [MyDevice.Surface]
 
-  That is the whole consumer for a Raspberry Pi with a display: at start the surface waits for `/dev/fb0` to appear, reads its size and depth from sysfs, picks the pixel format (`RGB565` at 16 bits per pixel, `XRGB8888` at 32) and a font scale that keeps about a hundred columns on the long side, detaches the kernel console from the framebuffer, starts the app, and reads the first USB keyboard it finds, looking again whenever there is none. Pixels go out with `RasterExRatatui.Framebuffer.write/2`; keys come in through `RasterExRatatui.Input.Devices`. When the app exits, a new one starts on the same surface (`on_app_exit: :restart`), because a panel has nothing else to show.
+  That is the whole consumer for a Raspberry Pi with a display: at start the surface waits for `/dev/fb0` to appear, reads its size and depth from sysfs, picks the pixel format (`RGB565` at 16 bits per pixel, `XRGB8888` at 32) and a font scale that keeps about a hundred columns on the long side, detaches the kernel console from the framebuffer, starts the app, and reads the first USB keyboard it finds (and the touch panel, with `touch: true`), looking again whenever there is none. Pixels go out with `RasterExRatatui.Framebuffer.write/2`; keys and taps come in through `RasterExRatatui.Input.Devices`. When the app exits, a new one starts on the same surface (`on_app_exit: :restart`), because a panel has nothing else to show.
 
   ## Options
 
@@ -25,7 +25,8 @@ defmodule RasterExRatatui.Framebuffer.Surface do
   | `:rotate` | `0` | `90`, `180`, or `270` for a panel mounted on its side (see `RasterExRatatui.Raster`) |
   | `:console` | `"vtcon1"` | the framebuffer console to detach, or `false` to leave it |
   | `:keyboard` | `true` | read the first keyboard found, a `"/dev/input/eventN"` path, or `false` |
-  | `:touch` | `false` | the touch panel, the same way (read from the next release on) |
+  | `:touch` | `false` | the touch panel, the same way: taps and drags reach the app as `ExRatatui.Event.Mouse` events on the cell under the finger, rotation included |
+  | `:swap_xy`, `:invert_x`, `:invert_y` | `false` | for a touch controller that does not follow the panel's orientation (`RasterExRatatui.Input.Touch`) |
   | `:on_app_exit` | `:restart` | `:stop` to let the supervisor decide instead |
   | `:font`, `:format_opts`, `:app_opts`, `:min_interval`, `:push_mode`, `:shutdown_timeout`, `:name` | | as in `RasterExRatatui.Surface` |
   | `:retry_ms`, `:layout`, `:emit_release`, `:input` | | as in `RasterExRatatui.Input.Devices` |
@@ -122,7 +123,7 @@ defmodule RasterExRatatui.Framebuffer.Surface do
         on_app_exit: Keyword.get(opts, :on_app_exit, :restart)
       ]
 
-      {:ok, config, %{fb: fb, devices: devices(opts)}}
+      {:ok, config, %{fb: fb, devices: devices(opts, config)}}
     else
       {:error, reason} -> {:stop, {:framebuffer, reason}}
     end
@@ -188,10 +189,24 @@ defmodule RasterExRatatui.Framebuffer.Surface do
     end
   end
 
-  defp devices(opts) do
+  # The touch panel reports pixels; the cell under a finger is the raster's
+  # to say, so a raster of the same geometry as the surface's (it is built
+  # from the same config) answers `cell_at`, rotation included.
+  defp devices(opts, config) do
+    raster =
+      config
+      |> Keyword.take([:size, :format, :scale, :rotate])
+      |> Keyword.merge(Keyword.take(opts, [:font, :format_opts]))
+      |> RasterExRatatui.Raster.new()
+
     devices =
       opts
       |> Keyword.take([:input, :keyboard, :touch, :retry_ms, :layout, :emit_release])
+      |> Keyword.merge(Keyword.take(opts, [:swap_xy, :invert_x, :invert_y]))
+      |> Keyword.merge(
+        size: Keyword.fetch!(config, :size),
+        cell_at: &RasterExRatatui.Raster.cell_at(raster, &1)
+      )
       |> Devices.new()
 
     case Devices.start(devices) do

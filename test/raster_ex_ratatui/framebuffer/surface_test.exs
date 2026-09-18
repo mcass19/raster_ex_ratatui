@@ -44,7 +44,7 @@ end
 defmodule RasterExRatatui.Framebuffer.SurfaceTest do
   use ExUnit.Case, async: true
 
-  alias ExRatatui.Event.Key
+  alias ExRatatui.Event.{Key, Mouse}
   alias RasterExRatatui.Framebuffer.SurfaceTest.{Counting, Panel}
   alias RasterExRatatui.PixelFormat.{RGB565, XRGB8888}
   alias RasterExRatatui.{Raster, Surface}
@@ -202,6 +202,54 @@ defmodule RasterExRatatui.Framebuffer.SurfaceTest do
       refute_received {:reader, _reader, _opts}
       send(surface, :anything)
       assert eventually(fn -> FakePanel.written(root) == 720 * 320 end)
+    end
+  end
+
+  describe "the touch panel" do
+    @panel {"/dev/input/event2",
+            %{
+              report_info: [
+                ev_key: [:btn_touch],
+                ev_abs: [
+                  abs_mt_slot: %{min: 0, max: 9},
+                  abs_mt_tracking_id: %{min: 0, max: 65_535},
+                  abs_mt_position_x: %{min: 0, max: 359},
+                  abs_mt_position_y: %{min: 0, max: 319}
+                ]
+              ]
+            }}
+
+    defp finger_tap(x, y) do
+      [
+        {:ev_abs, :abs_mt_slot, 0},
+        {:ev_abs, :abs_mt_tracking_id, 4},
+        {:ev_abs, :abs_mt_position_x, x},
+        {:ev_abs, :abs_mt_position_y, y},
+        {:ev_syn, :syn_report, 0},
+        {:ev_abs, :abs_mt_tracking_id, -1},
+        {:ev_syn, :syn_report, 0}
+      ]
+    end
+
+    test "lands taps in the app on the cell under the finger, flat and turned", %{root: root} do
+      Input.devices([@keyboard, @panel])
+
+      for {rotate, {px, py}, {col, row}} <- [{0, {13, 9}, {2, 1}}, {90, {5, 10}, {1, 44}}] do
+        surface =
+          start_supervised!(
+            {Panel, root: root, touch: true, rotate: rotate, app_opts: [notify: self()]},
+            id: {Panel, rotate}
+          )
+
+        assert_receive {:mounted, _opts}, 1_000
+        assert_receive {:reader, _reader, path: "/dev/input/event2", grab: true}, 1_000
+
+        send(surface, {:input_event, "/dev/input/event2", finger_tap(px, py)})
+        assert_receive {:mouse, %Mouse{kind: "down", button: "left", x: ^col, y: ^row}}, 1_000
+        assert_receive {:mouse, %Mouse{kind: "up", x: ^col, y: ^row}}, 1_000
+
+        :ok = stop_supervised({Panel, rotate})
+      end
     end
   end
 
