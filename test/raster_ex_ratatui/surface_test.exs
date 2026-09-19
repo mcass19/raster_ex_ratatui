@@ -156,6 +156,10 @@ defmodule RasterExRatatui.SurfaceTest do
 
       assert :ok = stop_supervised(DefaultSurface)
       assert DefaultSurface.child_spec([]).restart == :transient
+
+      # The supervisor waits a second longer than the surface waits for the app.
+      assert DefaultSurface.child_spec([]).shutdown == 5_000
+      assert DefaultSurface.child_spec(shutdown_timeout: 9_000).shutdown == 10_000
     end
   end
 
@@ -345,6 +349,59 @@ defmodule RasterExRatatui.SurfaceTest do
 
       Surface.send_event(surface, key("a"))
       assert_receive {:pushed, [%Patch{x: 12, y: 0, width: 6, height: 8}]}
+    end
+
+    test "on_app_exit: :restart gives up on a crash loop and stops with the app's reason" do
+      Process.flag(:trap_exit, true)
+      attach([[:raster_ex_ratatui, :app, :exit]])
+
+      log =
+        capture_log(fn ->
+          {:ok, surface} =
+            TestSurface.start_link(
+              test_pid: self(),
+              on_app_exit: :restart,
+              max_restarts: 2,
+              app_opts: [crash_loop: true]
+            )
+
+          assert_receive {:EXIT, ^surface, {%RuntimeError{message: "crash loop"}, _stack}}, 2_000
+          send(self(), {:surface, surface})
+        end)
+
+      assert_received {:surface, surface}
+
+      actions = for {:telemetry, _, %{pid: ^surface, action: a}} <- flush_mailbox(), do: a
+      assert actions == [:restart, :restart, :stop]
+      assert log =~ "crashed 3 times in 5 s, stopping the surface"
+    end
+
+    test "on_app_exit: :restart never counts quits against the limit" do
+      surface = start_surface(on_app_exit: :restart, max_restarts: 0, app_opts: [notify: self()])
+      assert_receive {:mounted, _opts}
+
+      # A plain quit exits :normal; "Q" exits {:shutdown, :bye}.
+      capture_log(fn ->
+        for code <- ~w(q Q q Q) do
+          Surface.send_event(surface, key(code))
+          assert_receive {:mounted, _opts}, 1_000
+        end
+      end)
+
+      assert Process.alive?(surface)
+    end
+
+    test "invalid max_restarts and max_seconds are rejected" do
+      Process.flag(:trap_exit, true)
+
+      for {key, value} <- [max_restarts: -1, max_seconds: 0] do
+        capture_log(fn ->
+          assert {:error, {%ArgumentError{message: message}, _}} =
+                   TestSurface.start_link([{key, value}, test_pid: self()])
+
+          assert message =~ inspect(key)
+        end)
+      end
     end
 
     test "a restarted app that fails to mount stops the surface" do

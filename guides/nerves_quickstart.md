@@ -23,7 +23,7 @@ defmodule MyDevice.Surface do
 end
 ```
 
-The surface only belongs on the device, so the application starts it when the target config has an entry for it:
+The surface only belongs on the device, so the application starts it when the target config has an entry for it. It goes last among the children: its start waits for the display driver, up to thirty seconds.
 
 ```elixir
 def start(_type, _args) do

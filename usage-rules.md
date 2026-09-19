@@ -52,10 +52,11 @@ end
 - Send input with `RasterExRatatui.Surface.send_event(surface, %ExRatatui.Event.Key{code: "enter", kind: "press"})`. Codes are lowercase strings and `kind` is the string `"press"`, never an atom.
 - From `handle_info/2`, return `{:events, [event], state}` to forward events, `{:noreply, state}` otherwise.
 - `app_opts` always carry `surface: %{size:, cell_size:, grid_size:, format:, scale:, rotate:}` (the panel in pixels, the effective cell, the grid in cells). Read it in `mount/1` or the reducer's `init/1` to lay the app out for its panel; never hardcode the cell size.
-- `on_app_exit: :stop` (default) makes the surface exit when the app exits (same reason); `on_app_exit: :restart` starts the app again on the same surface at once. Put the surface under a supervisor either way; do not restart the app by hand inside it. Both emit `[:raster_ex_ratatui, :app, :exit]` with `:reason` and `:action`.
+- `on_app_exit: :stop` (default) makes the surface exit when the app exits (same reason); `on_app_exit: :restart` starts the app again on the same surface at once, until it crashes more than `max_restarts:` (3) times within `max_seconds:` (5), when the surface stops and its supervisor takes over. Quits (`:normal`, `:shutdown`) are never counted. Put the surface under a supervisor either way; do not restart the app by hand inside it. Both emit `[:raster_ex_ratatui, :app, :exit]` with `:reason` and `:action`.
 - `min_interval:` (ms) throttles pushes for slow panels. The surface never builds a backlog: every render waiting when it gets to work is folded into one `Raster.apply/2` call (it takes a list) and one push, so slow panels or big regions show fewer frames, never later ones. `[:raster_ex_ratatui, :frame, :raster]` reports `:diffs` per batch.
 - The generated child spec is `restart: :transient`: an app that quits with `{:stop, state}` stays stopped, a crash restarts. A kiosk that must always come back uses `on_app_exit: :restart`.
-- `shutdown_timeout:` (default 4000 ms) bounds how long the surface waits for the app server to stop; keep it below the supervisor's shutdown so the consumer's `terminate/2` runs.
+- `shutdown_timeout:` (default 4000 ms) bounds how long the surface waits for the app server to stop; the generated child spec sets the supervisor's `:shutdown` a second above it. Pass it to `use` or the child spec, not only from `init/1`, which the child spec cannot see.
+- Put a `Framebuffer.Surface` last in its supervisor: its start waits for `/dev/fb0` up to `framebuffer_timeout:` (30 s).
 
 ## Sessions
 

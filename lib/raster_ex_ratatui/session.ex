@@ -233,14 +233,16 @@ defmodule RasterExRatatui.Session do
   end
 
   @doc """
-  Stops the app server, waiting up to the session's `shutdown_timeout:` for its `terminate/2` before killing it, and closes the cell session. Safe after `{:exit, _, _}`, when only the cell session is left to close.
+  Stops the app server, waiting up to the session's `shutdown_timeout:` for its `terminate/2` before killing it, and closes the cell session. Leaves no `{:EXIT, …}` from the app in the caller's mailbox, even when the app died on its own just before. Safe after `{:exit, _, _}`, when only the cell session is left to close.
   """
   @spec stop(t()) :: :ok
   def stop(%__MODULE__{server: nil} = session), do: CellSession.close(session.cell_session)
 
   def stop(%__MODULE__{server: server} = session) do
-    # Unlinked first, so the stop needs no exit trapping and leaves no
-    # stray EXIT message behind.
+    # Unlinked before the exit this function causes, so that one leaves no
+    # EXIT behind. An app that died on its own before the unlink (just
+    # before stop/1, or between these two lines) has already sent one; it
+    # is flushed below, so the caller's mailbox ends up clean either way.
     ref = Process.monitor(server)
     Process.unlink(server)
     Process.exit(server, :shutdown)
@@ -255,6 +257,8 @@ defmodule RasterExRatatui.Session do
           {:DOWN, ^ref, :process, ^server, _reason} -> :ok
         end
     end
+
+    flush_exit(server)
 
     CellSession.close(session.cell_session)
   end
@@ -277,6 +281,14 @@ defmodule RasterExRatatui.Session do
   @spec frame(t()) :: binary()
   def frame(%__MODULE__{frame: nil, raster: raster}), do: Raster.frame(raster)
   def frame(%__MODULE__{frame: frame}), do: frame
+
+  defp flush_exit(server) do
+    receive do
+      {:EXIT, ^server, _reason} -> :ok
+    after
+      0 -> :ok
+    end
+  end
 
   defp new_cell_session(%Raster{} = raster) do
     {cols, rows} = Raster.grid_size(raster)

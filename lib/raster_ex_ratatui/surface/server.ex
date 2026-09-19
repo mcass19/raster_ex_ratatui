@@ -32,6 +32,9 @@ defmodule RasterExRatatui.Surface.Server do
     :push_mode,
     :min_interval,
     :on_app_exit,
+    :max_restarts,
+    :max_seconds,
+    crashes: [],
     timer: nil,
     last_push: nil,
     pending: []
@@ -60,9 +63,20 @@ defmodule RasterExRatatui.Surface.Server do
     min_interval = Keyword.get(opts, :min_interval, 0)
     shutdown_timeout = Keyword.get(opts, :shutdown_timeout, 4_000)
     on_app_exit = Keyword.get(opts, :on_app_exit, :stop)
+    max_restarts = Keyword.get(opts, :max_restarts, 3)
+    max_seconds = Keyword.get(opts, :max_seconds, 5)
 
     validate!(:push_mode, push_mode, push_mode in [:patches, :frame], ":patches or :frame")
     validate!(:on_app_exit, on_app_exit, on_app_exit in [:stop, :restart], ":stop or :restart")
+
+    validate!(
+      :max_restarts,
+      max_restarts,
+      non_neg_integer?(max_restarts),
+      "a non-negative integer"
+    )
+
+    validate!(:max_seconds, max_seconds, pos_integer?(max_seconds), "a positive integer")
 
     validate!(
       :min_interval,
@@ -97,7 +111,9 @@ defmodule RasterExRatatui.Surface.Server do
           session_opts: session_opts,
           push_mode: push_mode,
           min_interval: min_interval,
-          on_app_exit: on_app_exit
+          on_app_exit: on_app_exit,
+          max_restarts: max_restarts,
+          max_seconds: max_seconds
         }
 
         start_meta = %{size: Raster.size(raster), grid_size: Raster.grid_size(raster)}
@@ -133,7 +149,29 @@ defmodule RasterExRatatui.Surface.Server do
   # With `on_app_exit: :restart` a new app starts on a fresh session over
   # the same raster; its first render is a full payload, so the panel is
   # repainted. Whatever the old app had left pending is dropped.
+  #
+  # Restarts happen inside this process, where the supervisor cannot count
+  # them, so crashes are counted here the way a supervisor would: more than
+  # `max_restarts` within `max_seconds` and the surface stops with the
+  # app's reason, handing the loop to the real supervisor. An app that
+  # quits on purpose (a `:normal` or `:shutdown` exit) always comes back.
   defp app_exit(%__MODULE__{on_app_exit: :restart} = s, reason) do
+    s = count_crash(s, reason)
+
+    if length(s.crashes) > s.max_restarts do
+      Logger.error(
+        "#{inspect(s.module)}: #{inspect(s.app)} crashed #{length(s.crashes)} times in #{s.max_seconds} s, stopping the surface"
+      )
+
+      stop_on_exit(s, reason)
+    else
+      restart(s, reason)
+    end
+  end
+
+  defp app_exit(%__MODULE__{} = s, reason), do: stop_on_exit(s, reason)
+
+  defp restart(%__MODULE__{} = s, reason) do
     Telemetry.execute([:app, :exit], %{}, Map.merge(meta(s), %{reason: reason, action: :restart}))
 
     Logger.info(
@@ -148,9 +186,19 @@ defmodule RasterExRatatui.Surface.Server do
     end
   end
 
-  defp app_exit(%__MODULE__{} = s, reason) do
+  defp stop_on_exit(%__MODULE__{} = s, reason) do
     Telemetry.execute([:app, :exit], %{}, Map.merge(meta(s), %{reason: reason, action: :stop}))
     {:stop, reason, s}
+  end
+
+  # The crashes within the window, newest first; a deliberate exit is none.
+  defp count_crash(%__MODULE__{} = s, reason) when reason in [:normal, :shutdown], do: s
+  defp count_crash(%__MODULE__{} = s, {:shutdown, _}), do: s
+
+  defp count_crash(%__MODULE__{} = s, _reason) do
+    now = System.monotonic_time(:millisecond)
+    window = s.max_seconds * 1_000
+    %{s | crashes: [now | Enum.filter(s.crashes, &(now - &1 < window))]}
   end
 
   defp consumer_info(msg, %__MODULE__{module: module} = s) do
@@ -257,6 +305,7 @@ defmodule RasterExRatatui.Surface.Server do
   end
 
   defp non_neg_integer?(value), do: is_integer(value) and value >= 0
+  defp pos_integer?(value), do: is_integer(value) and value > 0
 
   defp meta(%__MODULE__{} = s), do: %{surface: s.module, mod: s.app, pid: self()}
 end

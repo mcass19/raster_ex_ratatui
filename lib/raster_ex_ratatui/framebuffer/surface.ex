@@ -27,10 +27,12 @@ defmodule RasterExRatatui.Framebuffer.Surface do
   | `:keyboard` | `true` | read the first keyboard found, a `"/dev/input/eventN"` path, or `false` |
   | `:touch` | `false` | the touch panel, the same way: taps and drags reach the app as `ExRatatui.Event.Mouse` events on the cell under the finger, rotation included |
   | `:swap_xy`, `:invert_x`, `:invert_y` | `false` | for a touch controller that does not follow the panel's orientation (`RasterExRatatui.Input.Touch`) |
-  | `:on_app_exit` | `:restart` | `:stop` to let the supervisor decide instead |
+  | `:on_app_exit` | `:restart` | `:stop` to let the supervisor decide instead; with `:restart`, `:max_restarts` crashes (default 3) within `:max_seconds` (default 5) still stop the surface |
   | `:font`, `:format_opts`, `:app_opts`, `:min_interval`, `:push_mode`, `:shutdown_timeout`, `:name` | | as in `RasterExRatatui.Surface` |
   | `:retry_ms`, `:layout`, `:emit_release`, `:input` | | as in `RasterExRatatui.Input.Devices` |
   | `:root` | `"/"` | where `/sys` and `/dev` are (tests point it at a fake tree) |
+
+  Starting blocks until the framebuffer is there, up to `:framebuffer_timeout`, so the surface belongs last in its supervisor: children after it would wait that long on a slow or missing display.
 
   The keyboard needs [`input_event`](https://hex.pm/packages/input_event) in the consumer's deps, a C port for Linux. Without it the surface logs a warning once and runs without input, so the same project still compiles and runs its tests on a host.
 

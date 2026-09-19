@@ -238,6 +238,18 @@ defmodule RasterExRatatui.SessionTest do
   end
 
   describe "stop/1" do
+    test "leaves no EXIT behind when the app died on its own just before", %{raster: raster} do
+      session = start_rendered(raster)
+      server = Session.server(session)
+      ref = Process.monitor(server)
+
+      Process.exit(server, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^server, :killed}
+
+      assert :ok = Session.stop(session)
+      refute_received {:EXIT, ^server, _reason}
+    end
+
     test "kills an app that does not stop in time", %{raster: raster} do
       session = start_rendered(raster, shutdown_timeout: 50, app_opts: [hang_terminate: true])
       server = Session.server(session)

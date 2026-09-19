@@ -635,36 +635,35 @@ defmodule RasterExRatatui.RasterTest do
       end
     end
 
-    test "checkerboards and dither follow the panel's pixel grid, not the app's" do
-      # An even panel: at 90 the app's (x + y) parity and the panel's disagree.
-      turned = mono({24, 16}, rotate: 90)
-      gray = %Cell{symbol: " ", bg: {:rgb, 128, 128, 128}}
-      assert {_fg, {:checker, even, odd}} = Mono.cell_paints(gray, turned.config)
+    for angle <- @angles do
+      test "checkerboards and dither follow the panel's pixel grid, not the app's, at #{angle}" do
+        # An even panel with margins on the app's right and bottom: at 90 and
+        # 270 the app's (x + y) parity and the panel's disagree, and at every
+        # angle the grid sits somewhere else on the panel.
+        turned = mono({26, 17}, rotate: unquote(angle))
+        {cols, rows} = Raster.grid_size(turned)
+        gray = %Cell{symbol: " ", bg: {:rgb, 128, 128, 128}}
+        assert {_fg, {:checker, even, odd}} = Mono.cell_paints(gray, turned.config)
 
-      cells = for col <- 0..1, row <- 0..2, do: %{gray | col: col, row: row}
-      {turned, _patches} = Raster.apply(turned, full_diff({2, 3}, cells))
-      frame = Raster.frame(turned)
+        cells = for col <- 0..(cols - 1), row <- 0..(rows - 1), do: %{gray | col: col, row: row}
+        {checked, _patches} = Raster.apply(turned, full_diff({cols, rows}, cells))
+        checker = Raster.frame(checked)
 
-      # The grid covers the panel's top 12 rows; the rest is the margin.
-      for x <- 0..23, y <- 0..11 do
-        expected = if rem(x + y, 2) == 0, do: even, else: odd
-        assert pixel(frame, turned, x, y) == expected, "pixel #{x},#{y}"
+        # A gray region over the whole grid dithers with the panel's Bayer
+        # tile: every covered pixel is what the format packs at that panel
+        # position, whichever way the app is turned.
+        region = region(0, 0, cols, rows, {128, 128, 128})
+        {dithered, _patches} = Raster.apply(turned, full_diff({cols, rows}, [], [region]))
+        dither = Raster.frame(dithered)
+
+        for x <- 0..25, y <- 0..16, Raster.cell_at(turned, {x, y}) != :outside do
+          expected = if rem(x + y, 2) == 0, do: even, else: odd
+          assert pixel(checker, turned, x, y) == expected, "checker #{x},#{y}"
+
+          assert pixel(dither, turned, x, y) == Mono.rgb_pixel(128, 128, 128, x, y, turned.config),
+                 "dither #{x},#{y}"
+        end
       end
-
-      # A gray region dithers exactly as it would on a flat panel of the
-      # same physical size: the Bayer tile is the panel's.
-      region = region(0, 0, 2, 3, {128, 128, 128})
-
-      {turned, _patches} =
-        Raster.apply(mono({24, 16}, rotate: 90), full_diff({2, 3}, [], [region]))
-
-      flat = mono({24, 16})
-
-      {flat, _patches} =
-        Raster.apply(flat, full_diff({4, 2}, [], [region(0, 0, 4, 2, {128, 128, 128})]))
-
-      assert binary_part(Raster.frame(turned), 0, 24 * 12) ==
-               binary_part(Raster.frame(flat), 0, 24 * 12)
     end
 
     property "cell_at/2 maps every pixel of a cell's rect back to it, and only those" do
@@ -748,24 +747,26 @@ defmodule RasterExRatatui.RasterTest do
       end
     end
 
-    test "a bitmap at panel size clipped by the grid edge lands turned too" do
-      # 2×2 cells of 12×16 pixels hanging one cell off the grid on both sides.
-      {flat, turned} = pair(RGB565, 270, {61, 41})
-      data = for y <- 0..15, x <- 0..11, into: <<>>, do: <<x * 20, y * 15, 128>>
+    for angle <- @angles do
+      test "a bitmap at panel size clipped by the grid edge lands turned at #{angle}" do
+        # 2×2 cells of 12×16 pixels hanging one cell off the grid on both sides.
+        {flat, turned} = pair(RGB565, unquote(angle), {61, 41})
+        data = for y <- 0..15, x <- 0..11, into: <<>>, do: <<x * 20, y * 15, 128>>
 
-      region = %Region{
-        x: 9,
-        y: 4,
-        width: 2,
-        height: 2,
-        pixel_width: 12,
-        pixel_height: 16,
-        data: data
-      }
+        region = %Region{
+          x: 9,
+          y: 4,
+          width: 2,
+          height: 2,
+          pixel_width: 12,
+          pixel_height: 16,
+          data: data
+        }
 
-      {expected, frame, patches, turned} = turned_frames({flat, turned}, @text_cells, [region])
-      assert frame == expected
-      assert blit(blank_frame(turned), turned, patches) == expected
+        {expected, frame, patches, turned} = turned_frames({flat, turned}, @text_cells, [region])
+        assert frame == expected
+        assert blit(blank_frame(turned), turned, patches) == expected
+      end
     end
   end
 

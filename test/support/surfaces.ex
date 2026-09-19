@@ -8,10 +8,12 @@ defmodule RasterExRatatui.Test.App do
   alias RasterExRatatui.Test.Frames
 
   # `notify:` gets `{:mounted, opts}` on every mount; `mount_counter:` (an
-  # Agent holding an integer) makes every mount after the first fail.
+  # Agent holding an integer) makes every mount after the first fail;
+  # `crash_loop: true` mounts fine, then crashes on its first message.
   @impl true
   def init(opts) do
     if pid = Keyword.get(opts, :notify), do: send(pid, {:mounted, opts})
+    if Keyword.get(opts, :crash_loop), do: send(self(), :crash_now)
 
     state = %{
       text: Keyword.get(opts, :text, "hi"),
@@ -32,8 +34,10 @@ defmodule RasterExRatatui.Test.App do
   end
 
   @impl true
+  def update({:info, :crash_now}, _state), do: raise("crash loop")
   def update({:event, %Key{code: "!"}}, _state), do: raise("boom")
   def update({:event, %Key{code: "q"}}, state), do: {:stop, state}
+  def update({:event, %Key{code: "Q"}}, _state), do: exit({:shutdown, :bye})
 
   def update({:event, %Key{code: code}}, state),
     do: {:noreply, %{state | text: state.text <> code}}
