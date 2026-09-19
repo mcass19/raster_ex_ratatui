@@ -191,24 +191,11 @@ defmodule RasterExRatatui.Framebuffer.Surface do
     end
   end
 
-  # The touch panel reports pixels; the cell under a finger is the raster's
-  # to say, so a raster of the same geometry as the surface's (it is built
-  # from the same config) answers `cell_at`, rotation included.
   defp devices(opts, config) do
-    raster =
-      config
-      |> Keyword.take([:size, :format, :scale, :rotate])
-      |> Keyword.merge(Keyword.take(opts, [:font, :format_opts]))
-      |> RasterExRatatui.Raster.new()
-
     devices =
       opts
       |> Keyword.take([:input, :keyboard, :touch, :retry_ms, :layout, :emit_release])
-      |> Keyword.merge(Keyword.take(opts, [:swap_xy, :invert_x, :invert_y]))
-      |> Keyword.merge(
-        size: Keyword.fetch!(config, :size),
-        cell_at: &RasterExRatatui.Raster.cell_at(raster, &1)
-      )
+      |> Keyword.merge(touch_opts(opts, config))
       |> Devices.new()
 
     case Devices.start(devices) do
@@ -221,6 +208,28 @@ defmodule RasterExRatatui.Framebuffer.Surface do
         )
 
         nil
+    end
+  end
+
+  # The touch panel reports pixels; the cell under a finger is the raster's
+  # to say, so a raster of the same geometry as the surface's (it is built
+  # from the same config) answers `cell_at`, rotation included. Only built
+  # when there is a touch panel to read.
+  defp touch_opts(opts, config) do
+    if Keyword.get(opts, :touch, false) do
+      raster =
+        config
+        |> Keyword.take([:size, :format, :scale, :rotate])
+        |> Keyword.merge(Keyword.take(opts, [:font, :format_opts]))
+        |> RasterExRatatui.Raster.new()
+
+      Keyword.take(opts, [:swap_xy, :invert_x, :invert_y]) ++
+        [
+          size: Keyword.fetch!(config, :size),
+          cell_at: &RasterExRatatui.Raster.cell_at(raster, &1)
+        ]
+    else
+      []
     end
   end
 end
