@@ -131,6 +131,8 @@ test "the dashboard shows the title" do
 end
 ```
 
+To look at it, `RasterExRatatui.Raster.to_png/1` turns the raster into a PNG of the physical panel: `File.write!("panel.png", RasterExRatatui.Raster.to_png(raster))` from a test or IEx, and any image viewer shows what the device would.
+
 ## Own process: Session
 
 Some devices already have a process in charge of the panel: a screen manager that navigates between apps, a driver loop that owns the bus. A second process whose `push/2` would only message the first is in the way there, and so is a surface that exits when its app does. `RasterExRatatui.Session` is the surface without the process: the app server, the cell session, and the raster, started from the caller and driven by the caller's mailbox.

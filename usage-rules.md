@@ -114,3 +114,4 @@ frame = RasterExRatatui.Raster.frame(raster)
 
 - Test surfaces on the host: a test `push/2` sends patches to the test process, and `RasterExRatatui.Surface.raster/1` + `RasterExRatatui.Raster.frame/1` show the panel.
 - Test rasterisation with a real headless `ExRatatui.CellSession` (`draw/2` + `take_cells_diff/1`); no TTY or device is involved.
+- `RasterExRatatui.Raster.to_png(raster)` snapshots the panel as a PNG (RGB8, physical size) for eyeballing; do not hand-roll PPM/PGM writers. A custom format needs the optional `unpack_row/2` callback for it.

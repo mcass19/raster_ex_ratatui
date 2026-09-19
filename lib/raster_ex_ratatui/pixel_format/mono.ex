@@ -158,6 +158,18 @@ defmodule RasterExRatatui.PixelFormat.Mono do
   @spec blank(term()) :: binary()
   def blank(_config), do: @paper
 
+  @impl true
+  @doc """
+  Each gray byte as an RGB8 pixel of that level.
+
+  ## Examples
+
+      iex> RasterExRatatui.PixelFormat.Mono.unpack_row(<<0, 255>>, %{})
+      <<0, 0, 0, 255, 255, 255>>
+  """
+  @spec unpack_row(binary(), term()) :: binary()
+  def unpack_row(row, _config), do: for(<<v <- row>>, into: <<>>, do: <<v, v, v>>)
+
   defp bg_tone(:black, _config), do: @ink
   defp bg_tone({:rgb, r, g, b}, config), do: rgb_tone(r, g, b, config)
   defp bg_tone(_other, _config), do: @paper

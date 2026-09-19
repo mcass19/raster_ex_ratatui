@@ -769,6 +769,70 @@ defmodule RasterExRatatui.RasterTest do
     end
   end
 
+  describe "to_png/1" do
+    # A minimal PNG reader: the chunks in order, each CRC checked, the
+    # IDAT data inflated into scanlines with their filter byte.
+    defp read_png(<<137, "PNG", 13, 10, 26, 10, chunks::binary>>) do
+      chunks = read_chunks(chunks)
+      [{"IHDR", <<w::32, h::32, 8, 2, 0, 0, 0>>} | rest] = chunks
+      assert {"IEND", <<>>} = List.last(rest)
+      data = rest |> Enum.filter(&(elem(&1, 0) == "IDAT")) |> Enum.map(&elem(&1, 1))
+      raw = :zlib.uncompress(IO.iodata_to_binary(data))
+      rows = for <<0, row::binary-size(w * 3) <- raw>>, do: row
+      assert length(rows) == h
+      {w, h, rows}
+    end
+
+    defp read_chunks(<<>>), do: []
+
+    defp read_chunks(<<len::32, type::binary-4, data::binary-size(len), crc::32, rest::binary>>) do
+      assert crc == :erlang.crc32([type, data])
+      [{type, data} | read_chunks(rest)]
+    end
+
+    defp rgb_at(rows, x, y), do: rows |> Enum.at(y) |> binary_part(x * 3, 3)
+
+    for format <- [Mono, RGB565, XRGB8888] do
+      test "#{inspect(format)}: the panel's colours, at every pixel" do
+        raster = Raster.new(size: {13, 9}, format: unquote(format))
+        # Pure black and pure white: the same on every format, tone rules included.
+        cells = [
+          %Cell{symbol: "█", fg: {:rgb, 0, 0, 0}},
+          %Cell{col: 1, symbol: " ", bg: {:rgb, 255, 255, 255}}
+        ]
+
+        {raster, _patches} = Raster.apply(raster, full_diff({2, 1}, cells))
+
+        {13, 9, rows} = read_png(Raster.to_png(raster))
+
+        assert rgb_at(rows, 0, 0) == <<0, 0, 0>>
+        assert rgb_at(rows, 6, 0) == <<255, 255, 255>>
+
+        frame = Raster.frame(raster)
+        line = 13 * Raster.bytes_per_pixel(raster)
+
+        expected =
+          for <<row::binary-size(line) <- frame>>,
+            do: unquote(format).unpack_row(row, raster.config)
+
+        assert rows == expected
+      end
+    end
+
+    test "is the physical panel on a rotated raster" do
+      raster = mono({24, 16}, rotate: 90)
+      assert {24, 16, _rows} = read_png(Raster.to_png(raster))
+    end
+
+    test "names the missing callback for a format without unpack_row/2" do
+      raster = Raster.new(size: {12, 8}, format: RasterExRatatui.Test.Gray)
+
+      assert_raise ArgumentError, ~r/Test.Gray does not implement unpack_row\/2/, fn ->
+        Raster.to_png(raster)
+      end
+    end
+  end
+
   describe "patches against frames" do
     property "writing apply/2's patches over the previous frame gives the next frame" do
       check all(

@@ -529,6 +529,49 @@ defmodule RasterExRatatui.Raster do
 
   defp overlapping?(_one_or_none), do: false
 
+  @doc """
+  Renders the whole panel as a PNG image: 8-bit RGB, the panel's physical size, what `frame/1` holds turned back into colours by the format's `c:RasterExRatatui.PixelFormat.unpack_row/2`.
+
+  For tests and debugging: a snapshot of what the panel would show, written with `File.write!/2` and opened in any image viewer. Pure Elixir, no dependency.
+
+  Raises `ArgumentError` when the format does not implement `c:RasterExRatatui.PixelFormat.unpack_row/2`.
+
+  ## Examples
+
+      iex> alias RasterExRatatui.{Raster, PixelFormat}
+      iex> png = Raster.to_png(Raster.new(size: {12, 8}, format: PixelFormat.RGB565))
+      iex> <<137, "PNG", 13, 10, 26, 10, 13::32, "IHDR", width::32, height::32, 8, 2, _::binary>> = png
+      iex> {width, height}
+      {12, 8}
+  """
+  @spec to_png(t()) :: binary()
+  def to_png(%__MODULE__{format: format, config: config, size: {width, height}} = raster) do
+    Code.ensure_loaded(format)
+
+    unless function_exported?(format, :unpack_row, 2) do
+      raise ArgumentError,
+            "#{inspect(format)} does not implement unpack_row/2, which to_png/1 needs to turn packed pixels back into colours"
+    end
+
+    line = width * raster.bytes_per_pixel
+    frame = frame(raster)
+
+    # Every scanline starts with its filter type: 0, none.
+    scanlines = for <<row::binary-size(^line) <- frame>>, do: [0, format.unpack_row(row, config)]
+
+    [
+      <<137, "PNG", 13, 10, 26, 10>>,
+      png_chunk("IHDR", <<width::32, height::32, 8, 2, 0, 0, 0>>),
+      png_chunk("IDAT", :zlib.compress(scanlines)),
+      png_chunk("IEND", <<>>)
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  defp png_chunk(type, data) do
+    <<byte_size(data)::32, type::binary, data::binary, :erlang.crc32([type, data])::32>>
+  end
+
   # -- patches ---------------------------------------------------------------
 
   defp full_patches(%__MODULE__{grid_size: {cols, rows}} = raster, regions) do

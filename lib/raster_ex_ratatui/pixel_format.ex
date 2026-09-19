@@ -18,6 +18,8 @@ defmodule RasterExRatatui.PixelFormat do
 
   `c:rgb_pixel/6` packs one region pixel. The position is there for ordered dithering; formats that do not dither ignore it.
 
+  `c:unpack_row/2` is optional and turns packed pixels back into RGB8, so `RasterExRatatui.Raster.to_png/1` can show what the panel shows.
+
   `c:rgb_row/4` is optional and packs a whole row of region pixels in one call. The raster prefers it when a format exports it, because regions are the expensive path: one function call per pixel is most of their cost. A format that does not define it gets `rgb_row/5`, the per-pixel fallback, which is exactly what the three built-in formats do in one binary comprehension instead.
 
   ## Examples
@@ -71,7 +73,14 @@ defmodule RasterExRatatui.PixelFormat do
   @doc "The packed pixel for areas no cell or region covers (margins, skipped cells)."
   @callback blank(config()) :: binary()
 
-  @optional_callbacks rgb_row: 4
+  @doc """
+  Unpacks a row of packed pixels back to RGB8, 3 bytes per pixel: what the panel shows, as colours.
+
+  Optional. `RasterExRatatui.Raster.to_png/1` needs it; nothing on the drawing path calls it.
+  """
+  @callback unpack_row(row :: binary(), config()) :: binary()
+
+  @optional_callbacks rgb_row: 4, unpack_row: 2
 
   @doc """
   Packs a row of region pixels with `format`, through its `c:rgb_row/4` when it has one and pixel by pixel through `c:rgb_pixel/6` otherwise.

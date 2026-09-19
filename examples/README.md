@@ -4,7 +4,7 @@
 
 | Example | Run | What to see |
 |---------|-----|-------------|
-| [`snapshot.exs`](https://github.com/mcass19/raster_ex_ratatui/blob/main/examples/headless/snapshot.exs) | `mix run examples/headless/snapshot.exs` | A dashboard with text, a gauge, a sparkline, and a `Viewport3D` cube rasterised twice from the same widgets: a colour frame (`XRGB8888` at scale 2, written as PPM) and a 1-bit e-ink frame (`Mono`, written as PGM). App widgets, a `CellSession` diff with a pixel region, `Raster.apply/2`, and `Raster.frame/1` in one file; the two images show what a pixel format decides. |
+| [`snapshot.exs`](https://github.com/mcass19/raster_ex_ratatui/blob/main/examples/headless/snapshot.exs) | `mix run examples/headless/snapshot.exs` | A dashboard with text, a gauge, a sparkline, and a `Viewport3D` cube rasterised twice from the same widgets: a colour frame (`XRGB8888` at scale 2) and a 1-bit e-ink frame (`Mono`), both written as PNG. App widgets, a `CellSession` diff with a pixel region, `Raster.apply/2`, and `Raster.to_png/1` in one file; the two images show what a pixel format decides. |
 
 ## Bench
 

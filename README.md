@@ -66,7 +66,7 @@ Input is whatever reads the hardware, turned into `ExRatatui.Event` structs and 
 
 ## Examples
 
-- [**Headless snapshot**](https://github.com/mcass19/raster_ex_ratatui/blob/main/examples/headless/snapshot.exs) — the whole pipeline in one file, with no device or terminal: a dashboard with a `Viewport3D` cube rasterised as a colour frame (`XRGB8888`, scale 2) and as a 1-bit e-ink frame (`Mono`), written as PPM and PGM images. `mix run examples/headless/snapshot.exs` from a checkout.
+- [**Headless snapshot**](https://github.com/mcass19/raster_ex_ratatui/blob/main/examples/headless/snapshot.exs) — the whole pipeline in one file, with no device or terminal: a dashboard with a `Viewport3D` cube rasterised as a colour frame (`XRGB8888`, scale 2) and as a 1-bit e-ink frame (`Mono`), written as PNGs with `Raster.to_png/1`. `mix run examples/headless/snapshot.exs` from a checkout.
 - [**`rpi_framebuffer`**](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/rpi_framebuffer) — `Framebuffer.Surface` on a Nerves project for any Raspberry Pi display (first hardware: a Pi 4 with the Touch Display 2, turned landscape with `rotate:`). The app is a two-tab dashboard with a `Viewport3D` object and a colour photo as pixel regions and a keyboard test; the same app runs in a terminal.
 - [**`e_ink`**](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/e_ink) — the pure core without a surface: a 400×300 1-bit e-ink name badge on Nerves, driven from the device's existing screen process with `Raster.apply/2` and `Patch.blit/4`, with a crash frame and two GPIO buttons as key events. A guide to the code in a [pull request](https://github.com/mcass19/name_badge/pull/3) on the badge firmware's fork.
 

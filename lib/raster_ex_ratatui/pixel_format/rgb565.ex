@@ -103,5 +103,24 @@ defmodule RasterExRatatui.PixelFormat.RGB565 do
   @spec blank(Palette.t()) :: binary()
   def blank(%Palette{reset_bg: {r, g, b}}), do: pack(r, g, b)
 
+  @impl true
+  @doc """
+  Each 16-bit pixel as RGB8, the low bits filled from the high ones so full red is 255, not 248.
+
+  ## Examples
+
+      iex> RasterExRatatui.PixelFormat.RGB565.unpack_row(<<0, 248, 224, 7, 31, 0>>, RasterExRatatui.Palette.new())
+      <<255, 0, 0, 0, 255, 0, 0, 0, 255>>
+  """
+  @spec unpack_row(binary(), term()) :: binary()
+  def unpack_row(row, _palette) do
+    for <<value::little-16 <- row>>, into: <<>> do
+      r = value >>> 11
+      g = value >>> 5 &&& 63
+      b = value &&& 31
+      <<r <<< 3 ||| r >>> 2, g <<< 2 ||| g >>> 4, b <<< 3 ||| b >>> 2>>
+    end
+  end
+
   defp pack(r, g, b), do: <<(r >>> 3) <<< 11 ||| (g >>> 2) <<< 5 ||| b >>> 3::little-16>>
 end

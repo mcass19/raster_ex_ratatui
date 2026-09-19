@@ -3,10 +3,10 @@
 # Draws a small dashboard (text, a gauge, a sparkline, and a 3D cube that
 # arrives as a pixel region) into an ExRatatui.CellSession sized for a
 # 640x360 panel, rasterises the diff twice, and writes both results as
-# images any viewer opens:
+# PNGs with Raster.to_png/1:
 #
-#   * a colour frame (XRGB8888 at scale 2), written as a binary PPM
-#   * a 1-bit e-ink frame (Mono at scale 1), written as a binary PGM
+#   * a colour frame (XRGB8888 at scale 2)
+#   * a 1-bit e-ink frame (Mono at scale 1)
 #
 #   mix run examples/headless/snapshot.exs
 #   mix run examples/headless/snapshot.exs /tmp/snapshot
@@ -71,30 +71,20 @@ defmodule Snapshot do
     :ok = CellSession.close(session)
 
     {raster, _patches} = Raster.apply(raster, diff)
-    Raster.frame(raster)
-  end
-
-  # XRGB8888 is little-endian B, G, R, X; PPM wants R, G, B.
-  def write_ppm(path, {width, height}, frame) do
-    rgb = for <<b, g, r, _x <- frame>>, into: <<>>, do: <<r, g, b>>
-    File.write!(path, ["P6\n#{width} #{height}\n255\n", rgb])
-  end
-
-  def write_pgm(path, {width, height}, frame) do
-    File.write!(path, ["P5\n#{width} #{height}\n255\n", frame])
+    raster
   end
 end
 
 prefix = List.first(System.argv()) || Path.join(System.tmp_dir!(), "raster_ex_ratatui_snapshot")
 size = {640, 360}
 
-colour = Raster.new(size: size, format: XRGB8888, scale: 2)
-Snapshot.write_ppm("#{prefix}.ppm", size, Snapshot.render(colour))
+colour = Snapshot.render(Raster.new(size: size, format: XRGB8888, scale: 2))
+File.write!("#{prefix}.png", Raster.to_png(colour))
 
-mono = Raster.new(size: size, format: Mono)
-Snapshot.write_pgm("#{prefix}_mono.pgm", size, Snapshot.render(mono))
+mono = Snapshot.render(Raster.new(size: size, format: Mono))
+File.write!("#{prefix}_mono.png", Raster.to_png(mono))
 
 IO.puts("""
-colour: #{inspect(Raster.grid_size(colour))} cells at #{inspect(Raster.font_size(colour))} px -> #{prefix}.ppm
-mono:   #{inspect(Raster.grid_size(mono))} cells at #{inspect(Raster.font_size(mono))} px -> #{prefix}_mono.pgm
+colour: #{inspect(Raster.grid_size(colour))} cells at #{inspect(Raster.font_size(colour))} px -> #{prefix}.png
+mono:   #{inspect(Raster.grid_size(mono))} cells at #{inspect(Raster.font_size(mono))} px -> #{prefix}_mono.png
 """)

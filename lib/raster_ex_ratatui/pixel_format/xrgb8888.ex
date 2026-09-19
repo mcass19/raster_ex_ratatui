@@ -101,5 +101,17 @@ defmodule RasterExRatatui.PixelFormat.XRGB8888 do
   @spec blank(Palette.t()) :: binary()
   def blank(%Palette{reset_bg: {r, g, b}}), do: pack(r, g, b)
 
+  @impl true
+  @doc """
+  Each 32-bit pixel as RGB8.
+
+  ## Examples
+
+      iex> RasterExRatatui.PixelFormat.XRGB8888.unpack_row(<<0, 128, 255, 255>>, RasterExRatatui.Palette.new())
+      <<255, 128, 0>>
+  """
+  @spec unpack_row(binary(), term()) :: binary()
+  def unpack_row(row, _palette), do: for(<<b, g, r, _x <- row>>, into: <<>>, do: <<r, g, b>>)
+
   defp pack(r, g, b), do: <<b, g, r, 255>>
 end
