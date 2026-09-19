@@ -4,7 +4,7 @@ ExRatatui apps on a 400×300 1-bit e-ink panel: the [Goatmire name badge](https:
 
 ## Why not a surface
 
-A `RasterExRatatui.Surface` would be a second process whose `push/2` still had to message the screen process, which is the one allowed to talk to the display. And a surface exits when its app exits, which is right under a supervisor but wrong here: the badge wants a crash frame, not a dead screen. Devices that already have a process in charge of the panel are what `RasterExRatatui.Session` is for: the app server, cell session, and raster started from that process, its renders folded with `Session.handle/2`, the kept frame from `Session.frame/1`, the app's exit as `{:exit, reason, session}`. The badge code in the pull request predates `Session` and does the same loop by hand with `Raster.apply/2` and `Patch.blit/4`; a new consumer starts from `Session` (see "Own process" in [Building a Surface](https://hexdocs.pm/raster_ex_ratatui/surfaces.html)).
+A `RasterExRatatui.Surface` would be a second process whose `push/2` still had to message the screen process, which is the one allowed to talk to the display. And a surface exits when its app exits, which is right under a supervisor but wrong here: the badge wants a crash frame, not a dead screen. Devices that already have a process in charge of the panel are what `RasterExRatatui.Session` is for: the app server, cell session, and raster started from that process, its renders folded with `Session.handle/2`, the kept frame from `Session.frame/1`, the app's exit as `{:exit, reason, session}`. See "Own process" in [Building a Surface](https://hexdocs.pm/raster_ex_ratatui/surfaces.html).
 
 ## Things specific to 1-bit panels
 

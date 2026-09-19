@@ -9,10 +9,11 @@ The consumer-facing API guide lives in [usage-rules.md](usage-rules.md) (shipped
 - **Pure core** (no processes, fully testable on the host):
   - `RasterExRatatui.Font` behaviour + `Font.Default6x8` (the built-in font), `Font.Art` (compile-time ASCII-art parser), `Font.Generated` (braille/eighths/quadrants for any cell size)
   - `RasterExRatatui.Palette` (colour terms → RGB) and `RasterExRatatui.PixelFormat` behaviour with `Mono` (gray8, 1-bit tone rules + Bayer dither), `RGB565`, `XRGB8888`
-  - `RasterExRatatui.Grid` (cell map + region list) and `RasterExRatatui.Raster` (grid → `Patch` list or a full frame)
-- **Surface** — `use RasterExRatatui.Surface`: a supervised process that owns the ExRatatui server on a `{:cell_session, ...}` transport, folds diffs through `Raster`, and calls the consumer's `push/2`. Input is the consumer's: it hands `ExRatatui.Event` structs to the surface, which forwards them to the server
-- **Device helpers** — `RasterExRatatui.Framebuffer` (Linux fbdev geometry + writes, file access injectable) and `RasterExRatatui.Input.Evdev` (pure evdev key → `ExRatatui.Event.Key` translator; the library does not depend on `input_event`)
-- **`examples/`** — a headless snapshot script, a rasterisation benchmark, `rpi_framebuffer/` (a Nerves project with its own `mix.exs`, deps, and tests: the surface process on `/dev/fb0`), and `e_ink/` (a README walking through the name badge fork, which uses the pure core). None of it is part of the library's build or coverage; `examples/README.md` is the catalogue page and every new example gets a row there
+  - `RasterExRatatui.Grid` (cell map + region list) and `RasterExRatatui.Raster` (grid → `Patch` list, a full frame, or a PNG; `rotate:` keeps `:size` physical and the grid logical, `cell_at/2` maps back)
+- **Session** — `RasterExRatatui.Session`: process-less, owns the cell session, the app server (linked to the caller), and the raster; the caller folds its messages with `handle/2`. Everything that runs an app goes through it
+- **Surfaces** — `use RasterExRatatui.Surface`: a supervised process holding a `Session` that adds the consumer's callbacks, `min_interval`, the push, telemetry, and `on_app_exit`. `use RasterExRatatui.Framebuffer.Surface` is a complete one for Linux fbdev + evdev, every callback overridable with a public default
+- **Device helpers** — `RasterExRatatui.Framebuffer` (Linux fbdev geometry + writes, `:root` injectable), `RasterExRatatui.Input.Devices` (process-less evdev discovery, grab, retry; reached through the `:input` option so the library never depends on `input_event`), and the pure translators `Input.Evdev` (keys) and `Input.Touch` (fingers → `Mouse` on cells)
+- **`examples/`** — a headless snapshot script, a rasterisation benchmark, `rpi_framebuffer/` (a Nerves project with its own `mix.exs`, deps, and tests: `Framebuffer.Surface` on `/dev/fb0`, run with `mise exec erlang@28 elixir@1.19.4-otp-28` and `MIX_TARGET=host` for its tests), and `e_ink/` (a README on the name badge fork, which runs its apps with `Session`). None of it is part of the library's build or coverage; `examples/README.md` is the catalogue page and every new example gets a row there
 
 ## Build
 
@@ -21,7 +22,8 @@ The consumer-facing API guide lives in [usage-rules.md](usage-rules.md) (shipped
 ## Testing
 
 - CI enforces **100% coverage** (`mix test --cover`); test fixtures under `test/support` (`RasterExRatatui.Test.*`) are excluded in `mix.exs`. Tests belong in the same commit as the code they cover
-- No TTY and no device in tests: drive a real `ExRatatui.CellSession.new(cols, rows, font_size: {w, h})` headlessly (`draw/2` + `take_cells_diff/1`) and assert on patches and frames; inject file access for `Framebuffer`
+- No TTY and no device in tests: drive a real `ExRatatui.CellSession.new(cols, rows, font_size: {w, h})` headlessly (`draw/2` + `take_cells_diff/1`) and assert on patches and frames; fake the device with `RasterExRatatui.Test.Panel` (sysfs + `dev/fb0` under `:root`) and `RasterExRatatui.Test.Input` (an `InputEvent` stand-in for `:input`)
+- Rotation is checked against `RasterExRatatui.Test.Rotation`, a slow obvious whole-frame rotation; a change to the raster's pixel paths keeps those tests and the patches-equal-frame property green at every angle
 - Key codes in `ExRatatui.Event.Key` are lowercase strings and `kind` is the string `"press"`, not an atom — self-consistent tests pass with the wrong values, so check against `ex_ratatui/lib/ex_ratatui/event/key.ex`
 
 ## Conventions

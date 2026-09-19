@@ -28,8 +28,10 @@ ExRatatui app ──> ExRatatui.Server ──> CellSession diff (cells + regions
 - **Pixel regions** — `Viewport3D` and `Image` arrive as RGB bitmaps and are scaled onto their cell rect at the panel's native resolution.
 - **Pixel formats** — `Mono` (1-bit panels: tone rules for cells, Bayer dither for regions), `RGB565`, and `XRGB8888`, with a palette for named, indexed, and RGB colours.
 - **Fonts** — a built-in 6×8 bitmap font with box drawing, blocks, and braille, an integer `scale:` for large panels, and a `Font` behaviour to bring another.
-- **Device helpers** — `Framebuffer` for Linux fbdev (geometry from sysfs, stride-aware writes), `Input.Devices` to own evdev keyboards, `Input.Evdev` to translate their events.
+- **Keyboards and touch** — `Input.Devices` finds, grabs, and re-finds evdev keyboards and touch panels; `Input.Evdev` and `Input.Touch` turn their events into the key and mouse events a terminal would send, taps landing on the right cell at any rotation.
+- **Device helpers** — `Framebuffer` for Linux fbdev: geometry from sysfs, stride-aware writes.
 - **Own process** — `Session` runs the app on a raster from a process the consumer already has; `Raster`, `Grid`, fonts, and formats underneath are plain functions.
+- **Snapshots** — `Raster.to_png/1` writes what the panel shows as a PNG, for tests and debugging.
 
 ## Quick start
 
@@ -43,7 +45,7 @@ defmodule MyDevice.Surface do
 end
 ```
 
-It waits for `/dev/fb0`, reads the panel's size and depth from sysfs, picks the pixel format and a font scale, keeps the kernel console off the display, reads the first USB keyboard (with [`input_event`](https://hex.pm/packages/input_event) in the deps), and restarts the app when it quits. Every default is an option or an override; [Linux Framebuffers](guides/framebuffer.md) has the details.
+It waits for `/dev/fb0`, reads the panel's size and depth from sysfs, picks the pixel format and a font scale, keeps the kernel console off the display, reads the first USB keyboard (and the touch panel, with `touch: true`) through [`input_event`](https://hex.pm/packages/input_event) in the deps, and restarts the app when it quits. Every default is an option or an override. [Nerves Quick Start](guides/nerves_quickstart.md) goes from `mix nerves.new` to the panel; [Linux Framebuffers](guides/framebuffer.md) has the details.
 
 **Any other panel** (an SPI LCD, an e-ink controller) answers three questions in its own surface: how big it is, how its pixels are packed, and how bytes reach it.
 
@@ -68,7 +70,7 @@ Input is whatever reads the hardware, turned into `ExRatatui.Event` structs and 
 
 - [**Headless snapshot**](https://github.com/mcass19/raster_ex_ratatui/blob/main/examples/headless/snapshot.exs) — the whole pipeline in one file, with no device or terminal: a dashboard with a `Viewport3D` cube rasterised as a colour frame (`XRGB8888`, scale 2) and as a 1-bit e-ink frame (`Mono`), written as PNGs with `Raster.to_png/1`. `mix run examples/headless/snapshot.exs` from a checkout.
 - [**`rpi_framebuffer`**](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/rpi_framebuffer) — `Framebuffer.Surface` on a Nerves project for any Raspberry Pi display (first hardware: a Pi 4 with the Touch Display 2, turned landscape with `rotate:`). The app is a two-tab dashboard with a `Viewport3D` object and a colour photo as pixel regions and a keyboard test; the same app runs in a terminal.
-- [**`e_ink`**](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/e_ink) — the pure core without a surface: a 400×300 1-bit e-ink name badge on Nerves, driven from the device's existing screen process with `Raster.apply/2` and `Patch.blit/4`, with a crash frame and two GPIO buttons as key events. A guide to the code in a [pull request](https://github.com/mcass19/name_badge/pull/3) on the badge firmware's fork.
+- [**`e_ink`**](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/e_ink) — `Session` without a surface: a 400×300 1-bit e-ink name badge on Nerves, its apps run from the device's existing screen process, with a crash frame and two GPIO buttons as key events. A guide to the code in a [pull request](https://github.com/mcass19/name_badge/pull/3) on the badge firmware's fork.
 
 The [examples catalog](examples/README.md) says what to look at in each.
 
@@ -76,10 +78,11 @@ The [examples catalog](examples/README.md) says what to look at in each.
 
 | Guide | Description |
 |-------|-------------|
-| [Building a Surface](guides/surfaces.md) | The contract: geometry, push, input, crashes, testing, and a 1-bit e-ink consumer as a worked example |
+| [Nerves Quick Start](guides/nerves_quickstart.md) | From `mix nerves.new` to an app on a Raspberry Pi's display with keyboard and touch, the build traps, and first checks |
+| [Building a Surface](guides/surfaces.md) | The contract: geometry, push, input, crashes, rotation, testing, `Session` for an own process, and a 1-bit e-ink consumer |
 | [Fonts](guides/fonts.md) | The glyph layout, the built-in 6×8 font, scale, and bringing a font |
 | [Pixel Formats](guides/pixel_formats.md) | `Mono` tone rules and dithering, colour palettes, writing a format |
-| [Linux Framebuffers](guides/framebuffer.md) | `Framebuffer` and `Input.Evdev`: device geometry, writes, the kernel console, and keyboards |
+| [Linux Framebuffers](guides/framebuffer.md) | `Framebuffer.Surface` and what it is made of: device geometry, writes, the kernel console, keyboards, and touch |
 | [Telemetry](guides/telemetry.md) | Rasterisation, push, and input events with a `Telemetry.Metrics` example |
 
 ## Ecosystem

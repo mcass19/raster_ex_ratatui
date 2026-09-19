@@ -96,6 +96,7 @@ defmodule RasterExRatatui.MixProject do
         "README.md": [title: "Overview"],
         "usage-rules.md": [title: "Usage Rules (for AI agents)"],
         "examples/README.md": [title: "Examples", filename: "examples"],
+        "guides/nerves_quickstart.md": [title: "Nerves Quick Start"],
         "guides/surfaces.md": [title: "Building a Surface"],
         "guides/fonts.md": [title: "Fonts"],
         "guides/pixel_formats.md": [title: "Pixel Formats"],
