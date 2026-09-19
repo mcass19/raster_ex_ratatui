@@ -17,7 +17,7 @@ import Config
 #     If they land mirrored or on the wrong axis, add `invert_x: true`,
 #     `invert_y: true`, or `swap_xy: true`
 #   * `app_opts:` - for the dashboard: `spin_ms:` between two turns of the object
-config :rpi_framebuffer, RpiFramebuffer.Surface, rotate: 90, touch: true
+config :rpi_framebuffer, RpiFramebuffer.Surface, touch: true
 
 # Use Ringlogger as the logger backend and remove :console.
 config :logger, backends: [RingLogger]

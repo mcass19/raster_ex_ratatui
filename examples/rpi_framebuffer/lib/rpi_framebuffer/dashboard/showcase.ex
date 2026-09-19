@@ -18,7 +18,7 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
   | `p`     | Next photo              |
   | `space` | Pause or resume turning |
 
-  On a touch panel, dragging a finger sideways turns the object by hand; it stops turning on its own while the finger is down.
+  On a touch panel, dragging a finger sideways on the 3D pane turns the object by hand (it stops turning on its own while the finger is down), and a swipe across the photo pane changes the photo: left to right for the next one, right to left for the previous one.
 
   ## Options
 
@@ -49,6 +49,8 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
   alias RpiFramebuffer.Dashboard.Tab
 
   @spin_ms 200
+  # Columns a finger has to travel across the photo for a swipe.
+  @swipe 3
   @sample_ms 1_000
   @step :math.pi() / 48
   @history 240
@@ -83,7 +85,7 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
       shape: :cube,
       angle: 0.0,
       paused?: false,
-      drag: nil,
+      gesture: nil,
       spin_ms: Keyword.get(opts, :spin_ms, @spin_ms),
       cell_size: Tab.cell_size(opts),
       photos: photos,
@@ -104,14 +106,22 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
   def update({:event, %Key{code: " ", kind: "press"}}, state),
     do: {:ok, %{state | paused?: not state.paused?}}
 
-  # A finger down holds the object; sideways moves turn it, a step a column.
-  def update({:event, %Mouse{kind: "down", x: x}}, state), do: {:ok, %{state | drag: x}}
+  # A finger landing on the photo starts a swipe; anywhere else it holds the
+  # object, and sideways moves turn it, a step a column. Without a body (the
+  # dashboard's size unknown) every finger turns the object.
+  def update({:mouse, %Mouse{kind: "down", x: x, y: y}, body}, state) do
+    gesture = if on_photo?(body, state, x, y), do: {:swipe, x}, else: {:turn, x}
+    {:ok, %{state | gesture: gesture}}
+  end
 
-  def update({:event, %Mouse{kind: "drag", x: x}}, %{drag: from} = state) when is_integer(from),
-    do: {:ok, %{state | drag: x, angle: state.angle + (x - from) * @step}}
+  def update({:mouse, %Mouse{kind: "drag", x: x}, _body}, %{gesture: {:turn, from}} = state),
+    do: {:ok, %{state | gesture: {:turn, x}, angle: state.angle + (x - from) * @step}}
 
-  def update({:event, %Mouse{kind: "up"}}, %{drag: from} = state) when is_integer(from),
-    do: {:ok, %{state | drag: nil}}
+  def update({:mouse, %Mouse{kind: "up", x: x}, _body}, %{gesture: {:swipe, from}} = state),
+    do: {:ok, %{state | gesture: nil, photo: swiped(state, x - from)}}
+
+  def update({:mouse, %Mouse{kind: "up"}, _body}, %{gesture: {:turn, _from}} = state),
+    do: {:ok, %{state | gesture: nil}}
 
   def update({:info, :spin}, state), do: {:ok, %{state | angle: state.angle + @step}}
   def update({:info, :sample}, state), do: {:ok, record(state, sample())}
@@ -124,7 +134,7 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
     sample = Subscription.interval(:showcase_sample, @sample_ms, Tab.message(__MODULE__, :sample))
     spin = Subscription.interval(:showcase_spin, state.spin_ms, Tab.message(__MODULE__, :spin))
 
-    if state.paused? or state.drag != nil, do: [sample], else: [sample, spin]
+    if state.paused? or match?({:turn, _}, state.gesture), do: [sample], else: [sample, spin]
   end
 
   @impl Tab
@@ -163,9 +173,7 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
 
   @impl Tab
   def render(state, area) do
-    [panes, beam] = Layout.split(area, :vertical, [{:fill, 1}, {:length, 13}])
-    direction = if Tab.landscape?(panes, state.cell_size), do: :horizontal, else: :vertical
-    [first, second] = Layout.split(panes, direction, [{:fill, 1}, {:fill, 1}])
+    {first, second, beam} = panes(state, area)
     {image, author} = Enum.at(state.photos, state.photo)
 
     viewport = %Viewport3D{
@@ -181,6 +189,33 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
       {image, second |> Tab.inner() |> photo_rect(state.cell_size)}
     ] ++ beam_widgets(state, beam)
   end
+
+  @doc """
+  The tab's three panes for `area`: the 3D object, the photo, and the BEAM readout. The first two sit side by side on a landscape area and stack on a portrait one.
+  """
+  @spec panes(map(), Rect.t()) :: {Rect.t(), Rect.t(), Rect.t()}
+  def panes(state, area) do
+    [panes, beam] = Layout.split(area, :vertical, [{:fill, 1}, {:length, 13}])
+    direction = if Tab.landscape?(panes, state.cell_size), do: :horizontal, else: :vertical
+    [first, second] = Layout.split(panes, direction, [{:fill, 1}, {:fill, 1}])
+    {first, second, beam}
+  end
+
+  defp on_photo?(nil, _state, _x, _y), do: false
+
+  defp on_photo?(%Rect{} = body, state, x, y) do
+    {_first, %Rect{} = photo, _beam} = panes(state, body)
+    x >= photo.x and x < photo.x + photo.width and y >= photo.y and y < photo.y + photo.height
+  end
+
+  # Left to right shows the next photo, right to left the previous one; a
+  # shorter move is a tap and changes nothing.
+  defp swiped(state, travel) when travel >= @swipe, do: rem(state.photo + 1, length(state.photos))
+
+  defp swiped(state, travel) when travel <= -@swipe,
+    do: Integer.mod(state.photo - 1, length(state.photos))
+
+  defp swiped(state, _travel), do: state.photo
 
   @doc """
   The largest centred rect inside `area` with the photos' 4:3 shape, given the cell size in pixels (with 6×8 cells, 4:3 in pixels is 16:9 in cells). The image widget anchors a fitted picture to the top left; handing it a rect of its own shape centres it.

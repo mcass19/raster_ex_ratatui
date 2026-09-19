@@ -18,11 +18,17 @@ defmodule RpiFramebuffer.Dashboard.Tab do
   @callback init(opts :: keyword()) :: state()
 
   @doc """
-  Handles `{:event, event}` (only while the tab is active) or `{:info, message}` (a message from one of the tab's subscriptions, active or not).
+  Handles `{:event, event}` (a key or a resize, only while the tab is active), `{:mouse, event, body}` (a finger or a mouse below the tab bar, with the rect the tab is drawn in, `nil` while the dashboard does not know its size), or `{:info, message}` (a message from one of the tab's subscriptions, active or not).
 
   Returns `:ignored` when nothing changed, so the dashboard skips the render.
   """
-  @callback update(message :: {:event, ExRatatui.Event.t()} | {:info, term()}, state()) ::
+  @callback update(
+              message ::
+                {:event, ExRatatui.Event.t()}
+                | {:mouse, ExRatatui.Event.Mouse.t(), Rect.t() | nil}
+                | {:info, term()},
+              state()
+            ) ::
               {:ok, state()} | :ignored
 
   @doc """

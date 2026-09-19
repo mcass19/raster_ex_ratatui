@@ -50,21 +50,50 @@ defmodule RpiFramebuffer.Dashboard.ShowcaseTest do
     end
 
     test "a finger drag turns the object by hand and holds the spin timer", %{state: state} do
-      assert {:ok, held} = Showcase.update({:event, touch("down", 20)}, state)
+      assert {:ok, held} = Showcase.update(touch("down", 20), state)
+      assert held.gesture == {:turn, 20}
       assert [%Subscription{id: :showcase_sample}] = Showcase.subscriptions(held, true)
 
-      assert {:ok, right} = Showcase.update({:event, touch("drag", 26)}, held)
+      assert {:ok, right} = Showcase.update(touch("drag", 26), held)
       assert_in_delta right.angle, 6 * :math.pi() / 48, 1.0e-9
-      assert {:ok, back} = Showcase.update({:event, touch("drag", 23)}, right)
+      assert {:ok, back} = Showcase.update(touch("drag", 23), right)
       assert_in_delta back.angle, 3 * :math.pi() / 48, 1.0e-9
 
-      assert {:ok, %{drag: nil} = let_go} = Showcase.update({:event, touch("up", 23)}, back)
+      assert {:ok, %{gesture: nil} = let_go} = Showcase.update(touch("up", 23), back)
       assert [_sample, %Subscription{id: :showcase_spin}] = Showcase.subscriptions(let_go, true)
     end
 
+    test "a swipe across the photo changes it, both ways, and a tap does not", %{state: state} do
+      # 106×41 is landscape: the photo is the right half of the top part.
+      body = %Rect{x: 0, y: 3, width: 106, height: 41}
+      {_object, photo, _beam} = Showcase.panes(state, body)
+      x = photo.x + 10
+      y = photo.y + 5
+
+      assert {:ok, swiping} = Showcase.update(touch("down", x, y, body), state)
+      assert swiping.gesture == {:swipe, x}
+      # The object keeps turning, and moving across the photo draws nothing.
+      assert [_sample, %Subscription{id: :showcase_spin}] = Showcase.subscriptions(swiping, true)
+      assert :ignored = Showcase.update(touch("drag", x + 4, y, body), swiping)
+
+      assert {:ok, %{photo: 1, gesture: nil}} =
+               Showcase.update(touch("up", x + 4, y, body), swiping)
+
+      assert {:ok, %{photo: 3}} = Showcase.update(touch("up", x - 4, y, body), swiping)
+      assert {:ok, %{photo: 0}} = Showcase.update(touch("up", x + 2, y, body), swiping)
+    end
+
+    test "on the 3D pane a finger turns the object even with a body", %{state: state} do
+      body = %Rect{x: 0, y: 3, width: 106, height: 41}
+      {object, _photo, _beam} = Showcase.panes(state, body)
+
+      assert {:ok, %{gesture: {:turn, 5}}} =
+               Showcase.update(touch("down", 5, object.y + 5, body), state)
+    end
+
     test "a drag or a lift without a finger down is ignored", %{state: state} do
-      assert :ignored = Showcase.update({:event, touch("drag", 5)}, state)
-      assert :ignored = Showcase.update({:event, touch("up", 5)}, state)
+      assert :ignored = Showcase.update(touch("drag", 5), state)
+      assert :ignored = Showcase.update(touch("up", 5), state)
     end
 
     test "has no timers while another tab is on screen", %{state: state} do
@@ -161,7 +190,9 @@ defmodule RpiFramebuffer.Dashboard.ShowcaseTest do
 
   defp key(code), do: %Key{code: code, kind: "press", modifiers: []}
 
-  defp touch(kind, x), do: %Mouse{kind: kind, button: "left", x: x, y: 10}
+  # A finger as the dashboard hands it over; without a body every finger turns the object.
+  defp touch(kind, x, y \\ 10, body \\ nil),
+    do: {:mouse, %Mouse{kind: kind, button: "left", x: x, y: y}, body}
 
   defp find(widgets, module),
     do: Enum.find(widgets, fn {widget, _rect} -> is_struct(widget, module) end)

@@ -27,7 +27,7 @@ defmodule RpiFramebuffer.Dashboard do
 
   ## Touch
 
-  On a touch panel a tap on a tab's title switches to it (`tab_at/1`); everything else the finger does below the tab bar goes to the tab on screen, as `ExRatatui.Event.Mouse` events on cells, like a mouse in a terminal.
+  On a touch panel a tap on a tab's title switches to it (`tab_at/1`); everything else the finger does below the tab bar goes to the tab on screen as `{:mouse, event, body}`: the `ExRatatui.Event.Mouse` event on a cell, like a mouse in a terminal, and the rect the tab is drawn in, so the tab can tell which of its panes the finger is on. The dashboard learns its size from the surface's mount options and from resize events; before it knows it (a terminal that has not resized yet), `body` is `nil`.
 
   ## Options
 
@@ -56,7 +56,13 @@ defmodule RpiFramebuffer.Dashboard do
 
   @impl ExRatatui.App
   def init(opts) do
-    {:ok, %{active: 0, tabs: Map.new(@tabs, &{&1, &1.init(opts)})}}
+    size =
+      case {opts[:width], opts[:height]} do
+        {width, height} when is_integer(width) and is_integer(height) -> {width, height}
+        _unknown -> nil
+      end
+
+    {:ok, %{active: 0, size: size, tabs: Map.new(@tabs, &{&1, &1.init(opts)})}}
   end
 
   @impl ExRatatui.App
@@ -73,7 +79,8 @@ defmodule RpiFramebuffer.Dashboard do
       when is_map_key(@jump, code),
       do: {:noreply, %{state | active: Map.fetch!(@jump, code)}}
 
-  def update({:event, %Resize{}}, state), do: {:noreply, state}
+  def update({:event, %Resize{width: width, height: height}}, state),
+    do: {:noreply, %{state | size: {width, height}}}
 
   # The tab bar is the dashboard's: a finger landing on a title switches tabs,
   # and nothing a finger does there reaches a tab.
@@ -84,6 +91,15 @@ defmodule RpiFramebuffer.Dashboard do
 
       _elsewhere ->
         {:noreply, state, render?: false}
+    end
+  end
+
+  def update({:event, %Mouse{} = mouse}, state) do
+    tab = active(state)
+
+    case tab.update({:mouse, mouse, body(state.size)}, state.tabs[tab]) do
+      {:ok, tab_state} -> {:noreply, put_in(state.tabs[tab], tab_state)}
+      :ignored -> {:noreply, state, render?: false}
     end
   end
 
@@ -163,10 +179,7 @@ defmodule RpiFramebuffer.Dashboard do
 
   @impl ExRatatui.App
   def render(state, %{width: width, height: height}) do
-    area = %Rect{x: 0, y: 0, width: width, height: height}
-
-    [bar, body, hints] =
-      Layout.split(area, :vertical, [{:length, @bar_height}, {:fill, 1}, {:length, 1}])
+    [bar, body, hints] = layout(width, height)
 
     tab = active(state)
 
@@ -187,6 +200,30 @@ defmodule RpiFramebuffer.Dashboard do
     [{tabs, bar}] ++
       tab.render(state.tabs[tab], body) ++
       [{hint_line(tab.hints(state.tabs[tab])), hints}]
+  end
+
+  @doc """
+  The rect the active tab is drawn in on a `{width, height}` grid, or `nil` while the size is unknown.
+
+  ## Examples
+
+      iex> RpiFramebuffer.Dashboard.body({106, 45})
+      %ExRatatui.Layout.Rect{x: 0, y: 3, width: 106, height: 41}
+
+      iex> RpiFramebuffer.Dashboard.body(nil)
+      nil
+  """
+  @spec body({pos_integer(), pos_integer()} | nil) :: Rect.t() | nil
+  def body(nil), do: nil
+
+  def body({width, height}) do
+    [_bar, body, _hints] = layout(width, height)
+    body
+  end
+
+  defp layout(width, height) do
+    area = %Rect{x: 0, y: 0, width: width, height: height}
+    Layout.split(area, :vertical, [{:length, @bar_height}, {:fill, 1}, {:length, 1}])
   end
 
   defp hint_line(tab_hints) do

@@ -78,7 +78,7 @@ defmodule RpiFramebuffer.Dashboard.InputTest do
 
       state =
         Enum.reduce(touches, state, fn mouse, state ->
-          {:ok, state} = Input.update({:event, mouse}, state)
+          {:ok, state} = Input.update({:mouse, mouse, nil}, state)
           state
         end)
 
@@ -101,8 +101,8 @@ defmodule RpiFramebuffer.Dashboard.InputTest do
     end
 
     test "spells out the last touch", %{state: state} do
-      {:ok, state} = Input.update({:event, touch("down", 3, 4)}, state)
-      {:ok, state} = Input.update({:event, touch("drag", 12, 40)}, state)
+      {:ok, state} = Input.update({:mouse, touch("down", 3, 4), nil}, state)
+      {:ok, state} = Input.update({:mouse, touch("drag", 12, 40), nil}, state)
       all = state |> Input.render(%Rect{x: 0, y: 3, width: 106, height: 41}) |> text()
 
       assert all =~ "kind       drag"

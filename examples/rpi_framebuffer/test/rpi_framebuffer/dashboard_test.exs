@@ -74,12 +74,30 @@ defmodule RpiFramebuffer.DashboardTest do
 
     test "below the bar a finger reaches the tab on screen", %{state: state} do
       assert {:noreply, state} = Dashboard.update({:event, touch("down", 20, 10)}, state)
-      assert state.tabs[Showcase].drag == 20
+      assert state.tabs[Showcase].gesture == {:turn, 20}
 
       assert {:noreply, state} =
                Dashboard.update({:event, touch("down", 7, 9)}, %{state | active: 1})
 
       assert state.tabs[Input].trail == [{7, 9}]
+    end
+  end
+
+  describe "size" do
+    test "comes from the mount options, follows resizes, and gives the tabs their body" do
+      assert {:ok, %{size: nil}} = Dashboard.init([])
+      assert {:ok, %{size: {106, 45}} = state} = Dashboard.init(width: 106, height: 45)
+
+      # On a 106×45 grid the Showcase's photo pane is the right half of its top part.
+      assert {:noreply, swiping} = Dashboard.update({:event, touch("down", 80, 10)}, state)
+      assert swiping.tabs[Showcase].gesture == {:swipe, 80}
+
+      assert {:noreply, %{size: {60, 80}} = portrait} =
+               Dashboard.update({:event, %Resize{width: 60, height: 80}}, state)
+
+      # Portrait stacks the panes: the same spot is on the 3D object now.
+      assert {:noreply, turning} = Dashboard.update({:event, touch("down", 40, 10)}, portrait)
+      assert turning.tabs[Showcase].gesture == {:turn, 40}
     end
   end
 
@@ -114,7 +132,7 @@ defmodule RpiFramebuffer.DashboardTest do
     end
 
     test "a resize renders again", %{state: state} do
-      assert {:noreply, ^state} =
+      assert {:noreply, %{size: {106, 45}}} =
                Dashboard.update({:event, %Resize{width: 106, height: 45}}, state)
     end
 

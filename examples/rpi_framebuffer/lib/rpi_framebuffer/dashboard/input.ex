@@ -54,7 +54,7 @@ defmodule RpiFramebuffer.Dashboard.Input do
     {:ok, state |> note(key) |> type(key)}
   end
 
-  def update({:event, %Mouse{x: x, y: y} = mouse}, state) do
+  def update({:mouse, %Mouse{x: x, y: y} = mouse, _body}, state) do
     {:ok, %{state | touch: mouse, trail: Tab.push(state.trail, {x, y}, @trail)}}
   end
 
