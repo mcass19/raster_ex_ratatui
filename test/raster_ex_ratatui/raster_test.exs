@@ -779,7 +779,8 @@ defmodule RasterExRatatui.RasterTest do
       assert {"IEND", <<>>} = List.last(rest)
       data = rest |> Enum.filter(&(elem(&1, 0) == "IDAT")) |> Enum.map(&elem(&1, 1))
       raw = :zlib.uncompress(IO.iodata_to_binary(data))
-      rows = for <<0, row::binary-size(w * 3) <- raw>>, do: row
+      line = w * 3
+      rows = for <<0, row::binary-size(^line) <- raw>>, do: row
       assert length(rows) == h
       {w, h, rows}
     end
@@ -813,7 +814,7 @@ defmodule RasterExRatatui.RasterTest do
         line = 13 * Raster.bytes_per_pixel(raster)
 
         expected =
-          for <<row::binary-size(line) <- frame>>,
+          for <<row::binary-size(^line) <- frame>>,
             do: unquote(format).unpack_row(row, raster.config)
 
         assert rows == expected
