@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-19
+
 ### Migration
 
 Nothing breaks for consumers of the documented API. Two things to know:
@@ -62,5 +64,6 @@ Nothing breaks for consumers of the documented API. Two things to know:
 - `RasterExRatatui.Telemetry`: surface start/stop, rasterisation and push spans, and input forwarding events.
 - Guides (Building a Surface, Fonts, Pixel Formats, Linux Framebuffers, Telemetry), usage rules, a headless snapshot example, and a rasterisation benchmark.
 
-[Unreleased]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mcass19/raster_ex_ratatui/releases/tag/v0.1.0

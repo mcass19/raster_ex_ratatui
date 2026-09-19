@@ -43,7 +43,7 @@ Add `raster_ex_ratatui` to the dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:raster_ex_ratatui, "~> 0.1"}
+    {:raster_ex_ratatui, "~> 0.2"}
   ]
 end
 ```
