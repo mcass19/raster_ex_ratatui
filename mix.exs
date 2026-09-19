@@ -105,6 +105,7 @@ defmodule RasterExRatatui.MixProject do
         "CONTRIBUTING.md": [title: "Contributing"],
         "CHANGELOG.md": [title: "Changelog"]
       ],
+      before_closing_body_tag: &before_closing_body_tag/1,
       groups_for_extras: [
         Introduction: ["examples/README.md", "usage-rules.md"],
         Guides: ~r"guides/.+\.md"
@@ -146,4 +147,38 @@ defmodule RasterExRatatui.MixProject do
       ]
     ]
   end
+
+  # Renders ```mermaid blocks (the README's flow diagram) on hexdocs; GitHub
+  # renders them natively.
+  defp before_closing_body_tag(:html) do
+    """
+    <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script>
+      let mermaidInitialized = false;
+      window.addEventListener("exdoc:loaded", () => {
+        if (!mermaidInitialized) {
+          mermaid.initialize({
+            startOnLoad: false,
+            theme: document.body.className.includes("dark") ? "dark" : "default"
+          });
+          mermaidInitialized = true;
+        }
+
+        let id = 0;
+        for (const codeEl of document.querySelectorAll("pre code.mermaid")) {
+          const preEl = codeEl.parentElement;
+          const graphEl = document.createElement("div");
+          mermaid.render("mermaid-graph-" + id++, codeEl.textContent).then(({svg, bindFunctions}) => {
+            graphEl.innerHTML = svg;
+            bindFunctions?.(graphEl);
+            preEl.insertAdjacentElement("afterend", graphEl);
+            preEl.remove();
+          });
+        }
+      });
+    </script>
+    """
+  end
+
+  defp before_closing_body_tag(_format), do: ""
 end

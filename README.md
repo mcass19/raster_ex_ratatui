@@ -9,15 +9,18 @@ Render [ExRatatui](https://github.com/mcass19/ex_ratatui) apps on pixel displays
 
 A terminal paints glyphs for us. A panel with nothing but pixels does not, so something has to turn every cell (a symbol, a foreground, a background) into pixels, and blit the bitmaps that `Viewport3D` and `Image` render. `RasterExRatatui` is that something. It sits on top of an `ExRatatui.CellSession`, keeps the cell grid and the pixel regions of the current frame, and hands the device only the rectangles that changed, already packed in the panel's pixel format.
 
+## Flow
+
+```mermaid
+flowchart LR
+  app("ExRatatui app") --> server["ExRatatui.Server"]
+  server -- "cell diff<br/>cells + pixel regions" --> raster["Raster<br/>font × palette × format × scale"]
+  raster -- "changed rectangles<br/>%Patch{}" --> push[["push/2"]]
+  push --> panel[/"the panel"/]
+  input[/"keyboard, touch<br/>Input.Devices"/] -- "key and mouse events" --> server
 ```
-ExRatatui app ──> ExRatatui.Server ──> CellSession diff (cells + regions)
-                                              │
-                         RasterExRatatui.Raster  (font × palette × pixel format × scale)
-                                              │
-                         [%Patch{x, y, width, height, data}]
-                                              │
-                         Surface.push/2 ──> the panel
-```
+
+A surface (or a `Session` in a process the device already has) runs the app and owns this loop; the panel only ever sees packed pixels, in its own orientation.
 
 ## Features
 
@@ -32,6 +35,23 @@ ExRatatui app ──> ExRatatui.Server ──> CellSession diff (cells + regions
 - **Device helpers** — `Framebuffer` for Linux fbdev: geometry from sysfs, stride-aware writes.
 - **Own process** — `Session` runs the app on a raster from a process the consumer already has; `Raster`, `Grid`, fonts, and formats underneath are plain functions.
 - **Snapshots** — `Raster.to_png/1` writes what the panel shows as a PNG, for tests and debugging.
+
+## Installation
+
+Add `raster_ex_ratatui` to the dependencies in `mix.exs`:
+
+```elixir
+def deps do
+  [
+    {:raster_ex_ratatui, "~> 0.1"}
+  ]
+end
+```
+
+### Prerequisites
+
+- Elixir 1.17+
+- ex_ratatui 0.14 or later (pixel regions: `CellSession.new/3` with `font_size:`)
 
 ## Quick start
 
@@ -68,11 +88,7 @@ Input is whatever reads the hardware, turned into `ExRatatui.Event` structs and 
 
 ## Examples
 
-- [**Headless snapshot**](https://github.com/mcass19/raster_ex_ratatui/blob/main/examples/headless/snapshot.exs) — the whole pipeline in one file, with no device or terminal: a dashboard with a `Viewport3D` cube rasterised as a colour frame (`XRGB8888`, scale 2) and as a 1-bit e-ink frame (`Mono`), written as PNGs with `Raster.to_png/1`. `mix run examples/headless/snapshot.exs` from a checkout.
-- [**`rpi_framebuffer`**](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/rpi_framebuffer) — `Framebuffer.Surface` on a Nerves project for any Raspberry Pi display (first hardware: a Pi 4 with the Touch Display 2, turned landscape with `rotate:`). The app is a two-tab dashboard with a `Viewport3D` object and a colour photo as pixel regions and a keyboard test; the same app runs in a terminal.
-- [**`e_ink`**](https://github.com/mcass19/raster_ex_ratatui/tree/main/examples/e_ink) — `Session` without a surface: a 400×300 1-bit e-ink name badge on Nerves, its apps run from the device's existing screen process, with a crash frame and two GPIO buttons as key events. A guide to the code in a [pull request](https://github.com/mcass19/name_badge/pull/3) on the badge firmware's fork.
-
-The [examples catalog](examples/README.md) says what to look at in each.
+The [`examples`](examples/README.md) folder has a headless snapshot script, a benchmark, a Nerves project for a Raspberry Pi display with keyboard and touch, and an e-ink name badge; its README says what each one shows and how to run it.
 
 ## Guides
 
@@ -90,23 +106,6 @@ The [examples catalog](examples/README.md) says what to look at in each.
 - [ex_ratatui](https://github.com/mcass19/ex_ratatui) — The core terminal UI library this builds on.
 - [phoenix_ex_ratatui](https://github.com/mcass19/phoenix_ex_ratatui) — Run TUIs in the browser within [Phoenix LiveView](https://phoenix-live-view.hexdocs.pm/Phoenix.LiveView.html).
 - [kino_ex_ratatui](https://github.com/mcass19/kino_ex_ratatui) — Run TUIs inside [Livebook](https://livebook.dev) notebooks.
-
-## Installation
-
-Add `raster_ex_ratatui` to the dependencies in `mix.exs`:
-
-```elixir
-def deps do
-  [
-    {:raster_ex_ratatui, "~> 0.1"}
-  ]
-end
-```
-
-### Prerequisites
-
-- Elixir 1.17+
-- ex_ratatui 0.14 or later (pixel regions: `CellSession.new/3` with `font_size:`)
 
 ## Contributing
 
