@@ -6,6 +6,8 @@ defmodule RpiFramebuffer.Dashboard.Input do
 
   Plain and shifted keys go to the text input. Anything held with `ctrl`, `alt`, or `super` only shows up as the last key, so chords can be tried without typing garbage. Releases are ignored; repeats of a held key count as typing.
 
+  A touch panel's events show up beside the last key: the kind (`down`, `drag`, `up`), the cell under the finger, and the cells it passed through last.
+
   ## Keys
 
   | Key     | Action                          |
@@ -17,6 +19,7 @@ defmodule RpiFramebuffer.Dashboard.Input do
   @behaviour RpiFramebuffer.Dashboard.Tab
 
   alias ExRatatui.Event.Key
+  alias ExRatatui.Event.Mouse
   alias ExRatatui.Layout
   alias ExRatatui.Style
   alias ExRatatui.Text.Line
@@ -27,6 +30,7 @@ defmodule RpiFramebuffer.Dashboard.Input do
   alias RpiFramebuffer.Dashboard.Tab
 
   @history 200
+  @trail 6
   @editing ~w(backspace delete left right home end)
 
   @impl Tab
@@ -34,12 +38,24 @@ defmodule RpiFramebuffer.Dashboard.Input do
 
   @impl Tab
   def init(_opts) do
-    %{field: ExRatatui.text_input_new(), last: nil, count: 0, recent: [], echo: []}
+    %{
+      field: ExRatatui.text_input_new(),
+      last: nil,
+      count: 0,
+      recent: [],
+      echo: [],
+      touch: nil,
+      trail: []
+    }
   end
 
   @impl Tab
   def update({:event, %Key{kind: kind} = key}, state) when kind in ["press", "repeat"] do
     {:ok, state |> note(key) |> type(key)}
+  end
+
+  def update({:event, %Mouse{x: x, y: y} = mouse}, state) do
+    {:ok, %{state | touch: mouse, trail: Tab.push(state.trail, {x, y}, @trail)}}
   end
 
   def update(_message, _state), do: :ignored
@@ -113,7 +129,10 @@ defmodule RpiFramebuffer.Dashboard.Input do
 
   @impl Tab
   def render(state, area) do
-    [field, last, logs] = Layout.split(area, :vertical, [{:length, 3}, {:length, 6}, {:fill, 1}])
+    [field, lasts, logs] =
+      Layout.split(area, :vertical, [{:length, 3}, {:length, 6}, {:fill, 1}])
+
+    [last, touch] = Layout.split(lasts, :horizontal, [{:fill, 1}, {:fill, 1}])
     [recent, echo] = Layout.split(logs, :horizontal, [{:fill, 1}, {:fill, 1}])
 
     input = %TextInput{
@@ -128,6 +147,8 @@ defmodule RpiFramebuffer.Dashboard.Input do
       {input, field},
       {pane(" Last key ", :light_yellow), last},
       {%Paragraph{text: last_lines(state)}, Tab.inner(last)},
+      {pane(" Last touch ", :light_blue), touch},
+      {%Paragraph{text: touch_lines(state)}, Tab.inner(touch)},
       {pane(" Keys (#{state.count}) ", :light_green), recent},
       {%Paragraph{text: newest(state.recent, recent, &recent_line/1)}, Tab.inner(recent)},
       {pane(" Echo ", :light_magenta), echo},
@@ -148,6 +169,18 @@ defmodule RpiFramebuffer.Dashboard.Input do
       field_line("modifiers", modifiers, :white)
     ]
   end
+
+  defp touch_lines(%{touch: nil}), do: [field_line("cell", "touch the panel", :dark_gray)]
+
+  defp touch_lines(%{touch: %Mouse{} = mouse, trail: trail}) do
+    [
+      field_line("kind", mouse.kind, :light_blue),
+      field_line("cell", cell(mouse.x, mouse.y), :white),
+      field_line("trail", Enum.map_join(trail, " ", fn {x, y} -> cell(x, y) end), :white)
+    ]
+  end
+
+  defp cell(x, y), do: "#{x},#{y}"
 
   defp field_line(label, value, color) do
     %Line{

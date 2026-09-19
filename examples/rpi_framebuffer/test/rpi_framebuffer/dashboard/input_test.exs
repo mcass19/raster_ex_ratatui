@@ -3,6 +3,7 @@ defmodule RpiFramebuffer.Dashboard.InputTest do
 
   alias ExRatatui.CellSession
   alias ExRatatui.Event.Key
+  alias ExRatatui.Event.Mouse
   alias ExRatatui.Layout.Rect
   alias ExRatatui.Widgets.Block
   alias ExRatatui.Widgets.Paragraph
@@ -66,9 +67,24 @@ defmodule RpiFramebuffer.Dashboard.InputTest do
       assert length(state.recent) == 200
     end
 
-    test "ignores releases and everything that is not a key", %{state: state} do
+    test "ignores releases and everything that is neither a key nor a touch", %{state: state} do
       assert :ignored = Input.update({:event, key("a", [], "release")}, state)
       assert :ignored = Input.update({:info, :tick}, state)
+    end
+
+    test "records the last touch and a short trail of cells", %{state: state} do
+      touches =
+        [touch("down", 1, 1)] ++ for(x <- 2..8, do: touch("drag", x, 1)) ++ [touch("up", 8, 1)]
+
+      state =
+        Enum.reduce(touches, state, fn mouse, state ->
+          {:ok, state} = Input.update({:event, mouse}, state)
+          state
+        end)
+
+      assert %Mouse{kind: "up", x: 8, y: 1} = state.touch
+      assert state.trail == [{4, 1}, {5, 1}, {6, 1}, {7, 1}, {8, 1}, {8, 1}]
+      assert state.count == 0
     end
   end
 
@@ -79,7 +95,19 @@ defmodule RpiFramebuffer.Dashboard.InputTest do
       assert {%TextInput{state: ref}, %Rect{y: 3, height: 3}} = List.first(widgets)
       assert ref == state.field
       assert text(widgets) =~ "press any key"
+      assert text(widgets) =~ "touch the panel"
       assert " Keys (0) " in titles(widgets)
+      assert " Last touch " in titles(widgets)
+    end
+
+    test "spells out the last touch", %{state: state} do
+      {:ok, state} = Input.update({:event, touch("down", 3, 4)}, state)
+      {:ok, state} = Input.update({:event, touch("drag", 12, 40)}, state)
+      all = state |> Input.render(%Rect{x: 0, y: 3, width: 106, height: 41}) |> text()
+
+      assert all =~ "kind       drag"
+      assert all =~ "cell       12,40"
+      assert all =~ "trail      3,4 12,40"
     end
 
     test "spells out the last key and lists the newest first", %{state: state} do
@@ -116,6 +144,8 @@ defmodule RpiFramebuffer.Dashboard.InputTest do
 
   defp key(code, modifiers \\ [], kind \\ "press"),
     do: %Key{code: code, kind: kind, modifiers: modifiers}
+
+  defp touch(kind, x, y), do: %Mouse{kind: kind, button: "left", x: x, y: y}
 
   defp press(state, keys) do
     Enum.reduce(keys, state, fn key, state ->

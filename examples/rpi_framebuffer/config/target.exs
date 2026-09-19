@@ -12,9 +12,12 @@ import Config
 #   * `framebuffer:` - default "fb0"; `framebuffer_timeout:` - default 30_000 ms
 #   * `console:` - the framebuffer console to unbind, default "vtcon1", or false
 #   * `keyboard:` - true (default), a /dev/input/eventN path, or false
-#   * `touch:` - the touch panel, the same way (default false)
+#   * `touch:` - the touch panel, the same way (default false); taps and
+#     drags reach the dashboard as mouse events on cells, rotation included.
+#     If they land mirrored or on the wrong axis, add `invert_x: true`,
+#     `invert_y: true`, or `swap_xy: true`
 #   * `app_opts:` - for the dashboard: `spin_ms:` between two turns of the object
-config :rpi_framebuffer, RpiFramebuffer.Surface, rotate: 90
+config :rpi_framebuffer, RpiFramebuffer.Surface, rotate: 90, touch: true
 
 # Use Ringlogger as the logger backend and remove :console.
 config :logger, backends: [RingLogger]

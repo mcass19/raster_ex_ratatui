@@ -52,6 +52,37 @@ defmodule RpiFramebuffer.DashboardTest do
     end
   end
 
+  describe "touch" do
+    test "a finger on a title switches to its tab", %{state: state} do
+      assert {:noreply, %{active: 1} = state} =
+               Dashboard.update({:event, touch("down", 14, 1)}, state)
+
+      assert {:noreply, %{active: 0}} = Dashboard.update({:event, touch("down", 3, 2)}, state)
+    end
+
+    test "the rest of the tab bar is the dashboard's and renders nothing", %{state: state} do
+      for mouse <- [
+            touch("down", 11, 1),
+            touch("down", 40, 1),
+            touch("down", 3, 1),
+            touch("up", 14, 1),
+            touch("drag", 14, 0)
+          ] do
+        assert {:noreply, ^state, render?: false} = Dashboard.update({:event, mouse}, state)
+      end
+    end
+
+    test "below the bar a finger reaches the tab on screen", %{state: state} do
+      assert {:noreply, state} = Dashboard.update({:event, touch("down", 20, 10)}, state)
+      assert state.tabs[Showcase].drag == 20
+
+      assert {:noreply, state} =
+               Dashboard.update({:event, touch("down", 7, 9)}, %{state | active: 1})
+
+      assert state.tabs[Input].trail == [{7, 9}]
+    end
+  end
+
   describe "quitting" do
     test "ctrl+q quits anywhere", %{state: state} do
       for active <- 0..1 do
@@ -78,8 +109,8 @@ defmodule RpiFramebuffer.DashboardTest do
     test "what the active tab ignores does not render", %{state: state} do
       assert {:noreply, ^state, render?: false} = Dashboard.update({:event, key("x")}, state)
 
-      mouse = %Mouse{kind: "down", button: "left", x: 1, y: 1}
-      assert {:noreply, ^state, render?: false} = Dashboard.update({:event, mouse}, state)
+      stray = %Mouse{kind: "drag", button: "left", x: 5, y: 20}
+      assert {:noreply, ^state, render?: false} = Dashboard.update({:event, stray}, state)
     end
 
     test "a resize renders again", %{state: state} do
@@ -160,6 +191,8 @@ defmodule RpiFramebuffer.DashboardTest do
   end
 
   defp key(code, modifiers \\ []), do: %Key{code: code, kind: "press", modifiers: modifiers}
+
+  defp touch(kind, x, y), do: %Mouse{kind: kind, button: "left", x: x, y: y}
 
   defp ids(state), do: for(%Subscription{id: id} <- Dashboard.subscriptions(state), do: id)
 

@@ -18,6 +18,8 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
   | `p`     | Next photo              |
   | `space` | Pause or resume turning |
 
+  On a touch panel, dragging a finger sideways turns the object by hand; it stops turning on its own while the finger is down.
+
   ## Options
 
     * `:spin_ms` — milliseconds between two turns of the object, default `200`. Every turn re-renders the 3D region, so this is the knob for a slow panel.
@@ -26,6 +28,7 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
   @behaviour RpiFramebuffer.Dashboard.Tab
 
   alias ExRatatui.Event.Key
+  alias ExRatatui.Event.Mouse
   alias ExRatatui.Image
   alias ExRatatui.Layout
   alias ExRatatui.Layout.Rect
@@ -80,6 +83,7 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
       shape: :cube,
       angle: 0.0,
       paused?: false,
+      drag: nil,
       spin_ms: Keyword.get(opts, :spin_ms, @spin_ms),
       cell_size: Tab.cell_size(opts),
       photos: photos,
@@ -100,6 +104,15 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
   def update({:event, %Key{code: " ", kind: "press"}}, state),
     do: {:ok, %{state | paused?: not state.paused?}}
 
+  # A finger down holds the object; sideways moves turn it, a step a column.
+  def update({:event, %Mouse{kind: "down", x: x}}, state), do: {:ok, %{state | drag: x}}
+
+  def update({:event, %Mouse{kind: "drag", x: x}}, %{drag: from} = state) when is_integer(from),
+    do: {:ok, %{state | drag: x, angle: state.angle + (x - from) * @step}}
+
+  def update({:event, %Mouse{kind: "up"}}, %{drag: from} = state) when is_integer(from),
+    do: {:ok, %{state | drag: nil}}
+
   def update({:info, :spin}, state), do: {:ok, %{state | angle: state.angle + @step}}
   def update({:info, :sample}, state), do: {:ok, record(state, sample())}
   def update(_message, _state), do: :ignored
@@ -111,7 +124,7 @@ defmodule RpiFramebuffer.Dashboard.Showcase do
     sample = Subscription.interval(:showcase_sample, @sample_ms, Tab.message(__MODULE__, :sample))
     spin = Subscription.interval(:showcase_spin, state.spin_ms, Tab.message(__MODULE__, :spin))
 
-    if state.paused?, do: [sample], else: [sample, spin]
+    if state.paused? or state.drag != nil, do: [sample], else: [sample, spin]
   end
 
   @impl Tab

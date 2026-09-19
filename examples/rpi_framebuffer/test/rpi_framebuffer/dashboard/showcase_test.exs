@@ -4,6 +4,7 @@ defmodule RpiFramebuffer.Dashboard.ShowcaseTest do
   alias ExRatatui.CellSession
   alias ExRatatui.CellSession.Region
   alias ExRatatui.Event.Key
+  alias ExRatatui.Event.Mouse
   alias ExRatatui.Layout.Rect
   alias ExRatatui.Subscription
   alias ExRatatui.Widgets.Image
@@ -46,6 +47,24 @@ defmodule RpiFramebuffer.Dashboard.ShowcaseTest do
       assert [%Subscription{id: :showcase_sample}] = Showcase.subscriptions(paused, true)
       assert [{"s", _}, {"p", _}, {"space", "resume"}] = Showcase.hints(paused)
       assert [{"s", _}, {"p", _}, {"space", "pause"}] = Showcase.hints(state)
+    end
+
+    test "a finger drag turns the object by hand and holds the spin timer", %{state: state} do
+      assert {:ok, held} = Showcase.update({:event, touch("down", 20)}, state)
+      assert [%Subscription{id: :showcase_sample}] = Showcase.subscriptions(held, true)
+
+      assert {:ok, right} = Showcase.update({:event, touch("drag", 26)}, held)
+      assert_in_delta right.angle, 6 * :math.pi() / 48, 1.0e-9
+      assert {:ok, back} = Showcase.update({:event, touch("drag", 23)}, right)
+      assert_in_delta back.angle, 3 * :math.pi() / 48, 1.0e-9
+
+      assert {:ok, %{drag: nil} = let_go} = Showcase.update({:event, touch("up", 23)}, back)
+      assert [_sample, %Subscription{id: :showcase_spin}] = Showcase.subscriptions(let_go, true)
+    end
+
+    test "a drag or a lift without a finger down is ignored", %{state: state} do
+      assert :ignored = Showcase.update({:event, touch("drag", 5)}, state)
+      assert :ignored = Showcase.update({:event, touch("up", 5)}, state)
     end
 
     test "has no timers while another tab is on screen", %{state: state} do
@@ -141,6 +160,8 @@ defmodule RpiFramebuffer.Dashboard.ShowcaseTest do
   end
 
   defp key(code), do: %Key{code: code, kind: "press", modifiers: []}
+
+  defp touch(kind, x), do: %Mouse{kind: kind, button: "left", x: x, y: 10}
 
   defp find(widgets, module),
     do: Enum.find(widgets, fn {widget, _rect} -> is_struct(widget, module) end)

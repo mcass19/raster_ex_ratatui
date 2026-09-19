@@ -12,8 +12,10 @@ It is the example for the **framebuffer surface**: `RpiFramebuffer.Surface` is o
 
 | Tab | What to see |
 |-----|-------------|
-| **Showcase** | What a console cannot show: a lit, turning `Viewport3D` object and a colour photo as pixel regions at the panel's own resolution, next to BEAM sparklines and a gauge made of cells. `s` next object, `p` next photo, `space` pause. |
-| **Input** | The keyboard arriving whole: a text input, the last key with its modifiers spelled out, the keys before it, and an echo pane (`enter` sends, `esc` clears). |
+| **Showcase** | What a console cannot show: a lit, turning `Viewport3D` object and a colour photo as pixel regions at the panel's own resolution, next to BEAM sparklines and a gauge made of cells. `s` next object, `p` next photo, `space` pause, or drag a finger to turn it by hand. |
+| **Input** | The keyboard and the touch panel arriving whole: a text input, the last key with its modifiers spelled out, the last touch with the cells the finger passed through, the keys before it, and an echo pane (`enter` sends, `esc` clears). |
+
+A tap on a tab's title switches to it.
 
 ## Try it in a terminal first
 
