@@ -27,7 +27,8 @@ defmodule RasterExRatatui.Input.DevicesTest do
     devices
   end
 
-  defp press(code), do: [{:ev_key, code, 1}, {:ev_syn, :syn_report, 0}]
+  # A key press as input_event delivers it: one frame, no syn_report.
+  defp press(code), do: [{:ev_key, code, 1}]
 
   describe "new/1" do
     test "rejects bad options" do
@@ -184,19 +185,20 @@ defmodule RasterExRatatui.Input.DevicesTest do
     defp touch_opts,
       do: [touch: true, size: {24, 16}, cell_at: fn {x, y} -> {div(x, 6), div(y, 8)} end]
 
-    defp finger_tap(x, y) do
+    # A tap as input_event delivers it: two messages, one frame each,
+    # without the syn_report that ended the frame in the kernel.
+    defp finger_down(x, y) do
       [
-        {:ev_abs, :abs_mt_slot, 0},
         {:ev_abs, :abs_mt_tracking_id, 4},
         {:ev_abs, :abs_mt_position_x, x},
         {:ev_abs, :abs_mt_position_y, y},
         {:ev_key, :btn_touch, 1},
-        {:ev_syn, :syn_report, 0},
-        {:ev_abs, :abs_mt_tracking_id, -1},
-        {:ev_key, :btn_touch, 0},
-        {:ev_syn, :syn_report, 0}
+        {:ev_abs, :abs_x, x},
+        {:ev_abs, :abs_y, y}
       ]
     end
+
+    defp finger_up, do: [{:ev_abs, :abs_mt_tracking_id, -1}, {:ev_key, :btn_touch, 0}]
 
     test "needs the panel size and cell_at" do
       assert_raise ArgumentError, ~r/:size and :cell_at/, fn -> new(touch: true) end
@@ -211,21 +213,18 @@ defmodule RasterExRatatui.Input.DevicesTest do
       assert Devices.touch(devices) == "/dev/input/event2"
       assert devices.touch_state.axes == %{x: {0, 23}, y: {0, 15}}
 
-      assert {:events, [down, up], devices} =
+      assert {:events, [%Mouse{kind: "down", button: "left", x: 2, y: 1}], devices} =
                Devices.handle_info(
-                 {:input_event, "/dev/input/event2", finger_tap(13, 9)},
+                 {:input_event, "/dev/input/event2", finger_down(13, 9)},
                  devices
                )
 
-      assert %Mouse{kind: "down", button: "left", x: 2, y: 1} = down
-      assert %Mouse{kind: "up", x: 2, y: 1} = up
+      assert {:events, [%Mouse{kind: "up", x: 2, y: 1}], devices} =
+               Devices.handle_info({:input_event, "/dev/input/event2", finger_up()}, devices)
 
       # Unplugged mid-contact: the finger is lifted for the app, then the panel is looked for again.
       {:events, [%Mouse{kind: "down"}], devices} =
-        Devices.handle_info(
-          {:input_event, "/dev/input/event2", Enum.take(finger_tap(1, 1), 6)},
-          devices
-        )
+        Devices.handle_info({:input_event, "/dev/input/event2", finger_down(1, 1)}, devices)
 
       assert {:events, [%Mouse{kind: "up", x: 0, y: 0}], devices} =
                Devices.handle_info({:input_event, "/dev/input/event2", :disconnect}, devices)

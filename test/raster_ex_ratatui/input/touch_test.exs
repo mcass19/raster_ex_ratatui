@@ -16,9 +16,46 @@ defmodule RasterExRatatui.Input.TouchTest do
 
   defp syn, do: {:ev_syn, :syn_report, 0}
 
-  defp at(x, y), do: [{:ev_abs, :abs_mt_position_x, x}, {:ev_abs, :abs_mt_position_y, y}, syn()]
+  # One frame as input_event delivers it: no syn_report at the end.
+  defp at(x, y), do: [{:ev_abs, :abs_mt_position_x, x}, {:ev_abs, :abs_mt_position_y, y}]
 
   defp kinds({_touch, events}), do: Enum.map(events, &{&1.kind, &1.x, &1.y})
+
+  test "a tap as a Goodix panel sends it through input_event: two messages, no syn_report" do
+    # Captured on a Raspberry Pi Touch Display 2, scaled onto the test panel.
+    t = touch(axes: %{x: {0, 719}, y: {0, 1279}})
+
+    down = [
+      {:ev_abs, :abs_mt_tracking_id, 33},
+      {:ev_abs, :abs_mt_position_x, 683},
+      {:ev_abs, :abs_mt_position_y, 195},
+      {:ev_abs, :abs_mt_touch_major, 46},
+      {:ev_abs, :abs_mt_width_major, 46},
+      {:ev_key, :btn_touch, 1},
+      {:ev_abs, :abs_x, 683},
+      {:ev_abs, :abs_y, 195}
+    ]
+
+    up = [{:ev_abs, :abs_mt_tracking_id, -1}, {:ev_key, :btn_touch, 0}]
+
+    # 683 of 719 is pixel 21 of 24, 195 of 1279 is pixel 2 of 16: cell (3, 0).
+    assert {t, [%Mouse{kind: "down", button: "left", x: 3, y: 0}]} = Touch.translate_all(t, down)
+    assert {_t, [%Mouse{kind: "up", x: 3, y: 0}]} = Touch.translate_all(t, up)
+  end
+
+  test "explicit syn_reports still end frames, and nothing trails the last one" do
+    t = touch()
+
+    frames =
+      [{:ev_key, :btn_touch, 1}] ++
+        at(1, 1) ++ [syn()] ++ at(7, 1) ++ [syn(), {:ev_key, :btn_touch, 0}, syn()]
+
+    assert kinds(Touch.translate_all(t, frames)) == [
+             {"down", 0, 0},
+             {"drag", 1, 0},
+             {"up", 1, 0}
+           ]
+  end
 
   test "requires size and cell_at" do
     assert_raise ArgumentError, ~r/:size/, fn -> Touch.new(cell_at: & &1) end
@@ -64,16 +101,17 @@ defmodule RasterExRatatui.Input.TouchTest do
     {t, []} = Touch.translate_all(t, at(20, 3))
 
     {t, [%Mouse{kind: "up", x: 0, y: 0}]} =
-      Touch.translate_all(t, [{:ev_abs, :abs_mt_tracking_id, -1}, syn()])
+      Touch.translate_all(t, [{:ev_abs, :abs_mt_tracking_id, -1}, {:ev_key, :btn_touch, 0}])
 
     # And nothing at all without a contact.
     assert {^t, []} = Touch.translate_all(t, [syn()])
     assert {^t, []} = Touch.translate_all(t, [{:ev_msc, :msc_timestamp, 5}])
+    assert {^t, []} = Touch.translate_all(t, [])
   end
 
   test "a release with no contact on the grid emits nothing" do
     t = touch()
-    assert {_t, []} = Touch.translate_all(t, [{:ev_key, :btn_touch, 0}, syn()])
+    assert {_t, []} = Touch.translate_all(t, [{:ev_key, :btn_touch, 0}])
     assert {_t, []} = Touch.translate_all(t, :disconnect)
   end
 

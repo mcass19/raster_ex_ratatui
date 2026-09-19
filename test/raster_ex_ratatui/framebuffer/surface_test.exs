@@ -64,7 +64,8 @@ defmodule RasterExRatatui.Framebuffer.SurfaceTest do
     %{root: root}
   end
 
-  defp press(code), do: [{:ev_key, code, 1}, {:ev_syn, :syn_report, 0}]
+  # A key press as input_event delivers it: one frame, no syn_report.
+  defp press(code), do: [{:ev_key, code, 1}]
 
   defp eventually(fun, attempts \\ 50) do
     cond do
@@ -219,15 +220,19 @@ defmodule RasterExRatatui.Framebuffer.SurfaceTest do
               ]
             }}
 
+    # A tap as input_event delivers it: two messages, one frame each,
+    # without the syn_report that ended the frame in the kernel.
     defp finger_tap(x, y) do
       [
-        {:ev_abs, :abs_mt_slot, 0},
-        {:ev_abs, :abs_mt_tracking_id, 4},
-        {:ev_abs, :abs_mt_position_x, x},
-        {:ev_abs, :abs_mt_position_y, y},
-        {:ev_syn, :syn_report, 0},
-        {:ev_abs, :abs_mt_tracking_id, -1},
-        {:ev_syn, :syn_report, 0}
+        [
+          {:ev_abs, :abs_mt_tracking_id, 4},
+          {:ev_abs, :abs_mt_position_x, x},
+          {:ev_abs, :abs_mt_position_y, y},
+          {:ev_key, :btn_touch, 1},
+          {:ev_abs, :abs_x, x},
+          {:ev_abs, :abs_y, y}
+        ],
+        [{:ev_abs, :abs_mt_tracking_id, -1}, {:ev_key, :btn_touch, 0}]
       ]
     end
 
@@ -244,7 +249,9 @@ defmodule RasterExRatatui.Framebuffer.SurfaceTest do
         assert_receive {:mounted, _opts}, 1_000
         assert_receive {:reader, _reader, path: "/dev/input/event2", grab: true}, 1_000
 
-        send(surface, {:input_event, "/dev/input/event2", finger_tap(px, py)})
+        for frame <- finger_tap(px, py),
+            do: send(surface, {:input_event, "/dev/input/event2", frame})
+
         assert_receive {:mouse, %Mouse{kind: "down", button: "left", x: ^col, y: ^row}}, 1_000
         assert_receive {:mouse, %Mouse{kind: "up", x: ^col, y: ^row}}, 1_000
 

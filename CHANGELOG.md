@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Touch panels produced no mouse events through `input_event`. `input_event` delivers one evdev frame per message and drops the `syn_report` that ends it, and `RasterExRatatui.Input.Touch` only emitted on a `syn_report`, so it followed the finger and never reported it. `Input.Touch.translate_all/2` now takes the end of its list as the end of a frame (an explicit `syn_report` still ends one too), and the tests feed frames in the shape `input_event` sends, including a tap captured on a Raspberry Pi Touch Display 2.
+
 ## [0.2.0] - 2026-09-19
 
 ### Migration
