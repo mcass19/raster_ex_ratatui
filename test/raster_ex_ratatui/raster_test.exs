@@ -618,6 +618,92 @@ defmodule RasterExRatatui.RasterTest do
       end
     end
 
+    # Three regions over the same 2×2 cells' worth of panel: one whose
+    # bitmap already is its rect, one the raster has to stretch, one it has
+    # to shrink, plus one at panel size that hangs off the right of the
+    # grid. Every pixel is distinct, so a sample taken from the wrong row
+    # or column shows up as a wrong byte rather than a plausible blur.
+    defp scaled_regions do
+      [
+        detailed_region(1, 0, 2, 2, {12, 16}),
+        detailed_region(4, 0, 2, 2, {5, 7}),
+        detailed_region(7, 0, 2, 2, {19, 23}),
+        detailed_region(9, 3, 3, 2, {18, 16})
+      ]
+    end
+
+    defp detailed_region(x, y, width, height, {pw, ph}) do
+      data =
+        for i <- 0..(pw * ph - 1),
+            into: <<>>,
+            do: <<rem(i * 7, 256), rem(i * 13, 256), rem(i * 31, 256)>>
+
+      %Region{
+        x: x,
+        y: y,
+        width: width,
+        height: height,
+        pixel_width: pw,
+        pixel_height: ph,
+        data: data
+      }
+    end
+
+    # Panel pixels covered by a region, found through the public cell map.
+    defp region_pixels(%Raster{} = raster, regions) do
+      {width, height} = Raster.size(raster)
+
+      for x <- 0..(width - 1),
+          y <- 0..(height - 1),
+          cell = Raster.cell_at(raster, {x, y}),
+          cell != :outside,
+          Enum.any?(regions, &covers_cell?(&1, cell)),
+          do: {x, y}
+    end
+
+    defp covers_cell?(%Region{} = region, {col, row}) do
+      col >= region.x and col < region.x + region.width and row >= region.y and
+        row < region.y + region.height
+    end
+
+    for format <- [RGB565, XRGB8888], angle <- @angles do
+      test "regions at panel size, stretched, shrunk and clipped at #{angle} on #{inspect(format)} equal the rotated flat frame" do
+        {expected, frame, patches, turned} =
+          unquote(format) |> pair(unquote(angle)) |> turned_frames([], scaled_regions())
+
+        assert frame == expected
+        assert blit(blank_frame(turned), turned, patches) == expected
+      end
+    end
+
+    for angle <- @angles do
+      test "Mono regions at every scale at #{angle} dither the panel's own pixels" do
+        # Mono cannot be compared against a rotated flat frame: its Bayer
+        # tile is anchored to the panel, which is the point. So the same
+        # regions go onto an XRGB8888 panel, which is lossless and carries
+        # no dither, and every covered pixel has to be what Mono packs for
+        # that colour at that panel position.
+        regions = scaled_regions()
+        {_flat, rgb} = pair(XRGB8888, unquote(angle))
+        {_flat, mono} = pair(Mono, unquote(angle))
+        diff = full_diff(Raster.grid_size(mono), [], regions)
+
+        {rgb, _patches} = Raster.apply(rgb, diff)
+        {mono, patches} = Raster.apply(mono, diff)
+        rgb_frame = Raster.frame(rgb)
+        frame = Raster.frame(mono)
+
+        assert blit(blank_frame(mono), mono, patches) == frame
+
+        for {x, y} <- region_pixels(mono, regions) do
+          <<b, g, r, _alpha>> = pixel(rgb_frame, rgb, x, y)
+
+          assert pixel(frame, mono, x, y) == Mono.rgb_pixel(r, g, b, x, y, mono.config),
+                 "at #{x},#{y}"
+        end
+      end
+    end
+
     for angle <- @angles do
       test "Mono regions at #{angle}: the patches give the frame and the dither keeps its tone" do
         {flat, turned} = pair(Mono, unquote(angle))

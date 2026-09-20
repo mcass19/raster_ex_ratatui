@@ -45,10 +45,11 @@ defmodule RasterExRatatui.Raster do
                         │ C   │
                         └─────┘
 
-  Glyphs are rotated once as they enter the cache; a run of cells becomes a vertical strip; a pixel region is gathered from its bitmap already rotated, one panel row at a time. Dithering and checkerboards stay anchored to the panel's own pixel grid, which is what a 1-bit panel wants.
+  Glyphs are rotated once as they enter the cache; a run of cells becomes a vertical strip; a pixel region's bitmap is turned in one native pass by `ExRatatui.Pixels.rotate_rgb8/4` and then packed row by row, exactly as a flat one is. Dithering and checkerboards stay anchored to the panel's own pixel grid, which is what a 1-bit panel wants.
   """
 
   alias ExRatatui.CellSession.{Cell, Diff, Region, Snapshot}
+  alias ExRatatui.Pixels
   alias RasterExRatatui.{Font, Grid, Patch, PixelFormat}
 
   @cache_limit 4096
@@ -769,28 +770,52 @@ defmodule RasterExRatatui.Raster do
     rect_h = min(region.height * cell_h, rows * cell_h - y0)
 
     if rect_w > 0 and rect_h > 0 do
-      {x, y, width, height} = physical = physical_rect(raster, {x0, y0, rect_w, rect_h})
-      rows = region_rows(raster, region, {rect_w, rect_h}, physical)
-      %Patch{x: x, y: y, width: width, height: height, data: IO.iodata_to_binary(rows)}
+      {x, y, width, height} = physical_rect(raster, {x0, y0, rect_w, rect_h})
+
+      # The bitmap is sampled onto its rect in the app's orientation, turned
+      # once by the NIF, and only then packed — so the sampling never has to
+      # know which way the panel is mounted, and the packing always walks
+      # whole panel rows.
+      {rgb, _turned_w, _turned_h} =
+        raster
+        |> region_rgb(region, rect_w, rect_h)
+        |> Pixels.rotate_rgb8(rect_w, rect_h, raster.rotate)
+
+      data = pack_rows(raster, rgb, {x, y, width, height})
+      %Patch{x: x, y: y, width: width, height: height, data: data}
     end
   end
 
-  # One packed row per panel row of the rect, through the format's row path,
-  # which receives panel coordinates so dithering stays anchored to the panel.
-  defp region_rows(
-         %__MODULE__{rotate: 0} = raster,
+  # The region's bitmap nearest-neighbour sampled onto its rect, still in
+  # the app's orientation: `rect_w × rect_h` RGB8. A no-op in the usual
+  # case — a session created with the raster's font_size renders its
+  # regions at panel size, so the bitmap already is the rect.
+  defp region_rgb(
+         %__MODULE__{cell_size: {cell_w, cell_h}},
          %Region{pixel_width: pw, pixel_height: ph} = region,
-         {rect_w, rect_h},
-         {x0, y0, _rect_w, _rect_h}
+         rect_w,
+         rect_h
        ) do
-    {cell_w, cell_h} = raster.cell_size
-    %{format: format, config: config} = raster
     full_w = region.width * cell_w
     full_h = region.height * cell_h
 
-    # Nearest-neighbour column offsets into a source row, or nil when the
-    # bitmap's rows already are the rect's rows (the usual case: a session
-    # created with the raster's font_size renders regions at panel size).
+    if pw == full_w and ph == full_h and rect_w == full_w and rect_h == full_h do
+      region.data
+    else
+      sample(region, {full_w, full_h}, rect_w, rect_h)
+    end
+  end
+
+  # Nearest-neighbour sampling of a bitmap that is not already its rect.
+  # The column offsets into a source row are the same for every row, and
+  # nil when only the rows need picking; an upscaled region repeats source
+  # rows, so each one is gathered once.
+  defp sample(
+         %Region{pixel_width: pw, pixel_height: ph} = region,
+         {full_w, full_h},
+         rect_w,
+         rect_h
+       ) do
     gather =
       if pw == full_w and rect_w == full_w,
         do: nil,
@@ -799,86 +824,24 @@ defmodule RasterExRatatui.Raster do
     {rows, _last} =
       Enum.map_reduce(0..(rect_h - 1), {-1, nil}, fn dy, {last_sy, last_row} ->
         sy = div(dy * ph, full_h)
-        # An upscaled region repeats source rows; gather each one once.
         row = if sy == last_sy, do: last_row, else: source_row(region.data, sy, pw, gather)
-        {PixelFormat.rgb_row(format, row, x0, y0 + dy, config), {sy, row}}
+        {row, {sy, row}}
       end)
 
-    rows
+    IO.iodata_to_binary(rows)
   end
 
-  # Rotated by 90 or 270 with the bitmap at panel size (the usual case): a
-  # panel row is one column of the bitmap, gathered in a single bit-syntax
-  # pass over the rows instead of a `binary_part` per pixel. At 90 the
-  # column runs bottom to top, so the rows are reversed once first.
-  defp region_rows(
-         %__MODULE__{rotate: rotate} = raster,
-         %Region{pixel_width: pw, pixel_height: ph} = region,
-         {rect_w, rect_h},
-         {x0, y0, _out_w, out_h}
-       )
-       when rotate in [90, 270] and pw == region.width * elem(raster.cell_size, 0) and
-              ph == region.height * elem(raster.cell_size, 1) do
-    %{format: format, config: config} = raster
-    line = pw * 3
-    rows = binary_part(region.data, 0, rect_h * line)
-    source = if rotate == 90, do: reverse_rows(rows, line), else: rows
+  # One packed row per panel row of the rect, through the format's row path,
+  # which receives panel coordinates so dithering stays anchored to the panel.
+  defp pack_rows(%__MODULE__{format: format, config: config}, rgb, {x, y, width, height}) do
+    line = width * 3
 
-    for py <- 0..(out_h - 1) do
-      dx = if rotate == 90, do: py, else: rect_w - 1 - py
-      PixelFormat.rgb_row(format, column(source, dx * 3, line - dx * 3 - 3), x0, y0 + py, config)
-    end
-  end
-
-  # Rotated, with the bitmap scaled onto its rect: each panel row of the
-  # patch gathers its samples one by one. At 90 and 270 a panel row is a
-  # column of the app's image, so the per-row key is a source column and the
-  # per-pixel offsets walk source rows; at 180 it is a source row walked
-  # backwards. Rows sharing a key (an upscaled region) are gathered once.
-  defp region_rows(
-         %__MODULE__{rotate: rotate} = raster,
-         %Region{pixel_width: pw, pixel_height: ph} = region,
-         {rect_w, rect_h},
-         {x0, y0, out_w, out_h}
-       ) do
-    {cell_w, cell_h} = raster.cell_size
-    %{format: format, config: config} = raster
-    full_w = region.width * cell_w
-    full_h = region.height * cell_h
-    column = fn dx -> div(dx * pw, full_w) * 3 end
-    line = fn dy -> div(dy * ph, full_h) * pw * 3 end
-
-    {offsets, key} =
-      case rotate do
-        90 -> {for(px <- 0..(out_w - 1), do: line.(rect_h - 1 - px)), column}
-        180 -> {for(px <- 0..(out_w - 1), do: column.(rect_w - 1 - px)), &line.(rect_h - 1 - &1)}
-        270 -> {for(px <- 0..(out_w - 1), do: line.(px)), &column.(rect_w - 1 - &1)}
+    rows =
+      for dy <- 0..(height - 1) do
+        PixelFormat.rgb_row(format, binary_part(rgb, dy * line, line), x, y + dy, config)
       end
 
-    {rows, _last} =
-      Enum.map_reduce(0..(out_h - 1), {-1, nil}, fn py, {last_key, last_row} ->
-        k = key.(py)
-        row = if k == last_key, do: last_row, else: gather(region.data, offsets, k)
-        {PixelFormat.rgb_row(format, row, x0, y0 + py, config), {k, row}}
-      end)
-
-    rows
-  end
-
-  defp gather(data, offsets, base) do
-    for offset <- offsets, into: <<>>, do: binary_part(data, offset + base, 3)
-  end
-
-  # One pixel column of a row-major RGB8 bitmap, top to bottom: `skip`
-  # bytes before it and `tail` after it on every row.
-  defp column(rows, skip, tail) do
-    for <<_::binary-size(^skip), pixel::binary-size(3), _::binary-size(^tail) <- rows>>,
-      into: <<>>,
-      do: pixel
-  end
-
-  defp reverse_rows(rows, line) do
-    for(<<row::binary-size(^line) <- rows>>, do: row) |> Enum.reverse() |> IO.iodata_to_binary()
+    IO.iodata_to_binary(rows)
   end
 
   defp source_row(data, sy, pw, nil), do: binary_part(data, sy * pw * 3, pw * 3)
