@@ -115,7 +115,7 @@ use RasterExRatatui.Surface,
   rotate: 90
 ```
 
-`:size` stays the physical panel, and so do the patches, the frame, and `push/2`: the panel driver never knows. The grid is that of the turned image (1280×720 here, 106×45 cells at scale 2 instead of 60×80), the app receives it as its width and height and as `grid_size` in `surface:`, and `RasterExRatatui.Raster.logical_size/1` reports it. Glyphs are rotated once as they enter the raster's cache, a run of cells becomes a vertical strip, and pixel regions are gathered from their bitmaps already turned, so a rotated frame costs about what a flat one does. Dithering and checkerboards stay anchored to the panel's own pixels. The [Linux Framebuffers](framebuffer.md) guide has the console side of a rotated panel.
+`:size` stays the physical panel, and so do the patches, the frame, and `push/2`: the panel driver never knows. The grid is that of the turned image (1280×720 here, 106×45 cells at scale 2 instead of 60×80), the app receives it as its width and height and as `grid_size` in `surface:`, and `RasterExRatatui.Raster.logical_size/1` reports it. Glyphs are rotated once as they enter the raster's cache, a run of cells becomes a vertical strip, and a pixel region's bitmap is turned in one native pass before it is packed, so a rotated frame costs about what a flat one does. Dithering and checkerboards stay anchored to the panel's own pixels. The [Linux Framebuffers](framebuffer.md) guide has the console side of a rotated panel.
 
 ## Testing a surface
 

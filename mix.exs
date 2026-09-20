@@ -46,7 +46,7 @@ defmodule RasterExRatatui.MixProject do
 
   defp deps do
     [
-      {:ex_ratatui, "~> 0.14"},
+      {:ex_ratatui, "~> 0.15"},
       {:telemetry, "~> 1.0"},
 
       # Test

@@ -88,7 +88,7 @@ The surface logs the geometry, format, and scale it chose, and each input device
 - **The panel stays dark, SSH works, and the log shows `{:framebuffer, {:enoent, ...}}`.** No framebuffer appeared within `framebuffer_timeout:`. The Raspberry Pi Touch Display 2 does not come up on the 2.1.x Pi systems: their kernel lacks `CONFIG_BACKLIGHT_PWM`, which its overlay needs since Linux 6.18. Stay on `~> 2.0.0` for it; HDMI is not affected.
 - **A cursor or boot text over the app.** The console unbind failed or the framebuffer console is not `vtcon1`: `cat /sys/class/vtconsole/*/name` tells which one is the "frame buffer device", and `console:` takes its name.
 - **No keys.** `InputEvent.enumerate/0` should list a device whose `:ev_key` report includes `:key_a`. Wireless keyboards behind a receiver can show up as several devices; the surface takes the first that matches, and `keyboard: "/dev/input/eventN"` picks one.
-- **A 3D object or an image turns slowly.** A pixel region costs time per pixel every time it changes, about twice as much on a rotated panel. A slower animation tick or a smaller region is the fix; `Telemetry.probe/3` shows the cost.
+- **A 3D object or an image turns slowly.** A pixel region costs time per pixel every time it changes, on a rotated panel as on a flat one. A slower animation tick or a smaller region is the fix; `Telemetry.probe/3` shows the cost.
 - **`Under-voltage detected` in `dmesg`.** A Pi with a display draws more than a laptop's USB port gives; use a wall supply.
 
 ## When the defaults do not fit

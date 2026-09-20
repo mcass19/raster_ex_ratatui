@@ -4,7 +4,7 @@ A Nerves project that puts an ExRatatui dashboard on a Raspberry Pi's display th
 
 It is the example for the **framebuffer surface**: `RpiFramebuffer.Surface` is one `use RasterExRatatui.Framebuffer.Surface` under a supervisor. For a device that keeps its own screen process, see [`e_ink`](../e_ink).
 
-> **Status:** runs on a Raspberry Pi 4 with the Touch Display 2 (Nerves system 2.0.1, ex_ratatui 0.14.1), in the panel's native portrait. The dashboard comes up about twenty seconds after power, with no console or cursor over it, the keyboard and the touch panel are found at boot, and `ctrl+q` restarts the dashboard. With the Showcase tab turning its object five times a second, a frame costs about 43 ms to rasterise and 13 ms to write, and the surface keeps up. `rotate: 90` in the config turns it for a landscape stand, at about twice the raster cost for the pixel regions. Tests run on the host against a fake sysfs and a file standing in for `/dev/fb0`.
+> **Status:** runs on a Raspberry Pi 4 with the Touch Display 2 (Nerves system 2.0.1, ex_ratatui 0.14.1), in the panel's native portrait. The dashboard comes up about twenty seconds after power, with no console or cursor over it, the keyboard and the touch panel are found at boot, and `ctrl+q` restarts the dashboard. With the Showcase tab turning its object five times a second, a frame costs about 43 ms to rasterise and 13 ms to write, and the surface keeps up. `rotate: 90` in the config turns it for a landscape stand; now that the bitmap rotation happens in the NIF, its pixel regions cost a little over the flat figure instead of about twice it. Tests run on the host against a fake sysfs and a file standing in for `/dev/fb0`.
 
 ## What is on the panel
 
