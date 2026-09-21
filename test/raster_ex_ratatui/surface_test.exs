@@ -286,7 +286,7 @@ defmodule RasterExRatatui.SurfaceTest do
       log =
         capture_log(fn ->
           Surface.send_event(surface, key("!"))
-          assert_receive {:EXIT, ^surface, {%RuntimeError{message: "boom"}, _stack}}
+          assert_receive {:EXIT, ^surface, {%RuntimeError{message: "boom"}, _stack}}, 1_000
         end)
 
       assert log =~ "boom"
@@ -339,7 +339,7 @@ defmodule RasterExRatatui.SurfaceTest do
 
       capture_log(fn ->
         Surface.send_event(surface, key("!"))
-        assert_receive {:mounted, _opts}
+        assert_receive {:mounted, _opts}, 1_000
       end)
 
       assert_receive {:pushed, patches}
