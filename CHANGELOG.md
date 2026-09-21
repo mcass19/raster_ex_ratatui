@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-21
+
 ### Changed
 
 - **A pixel region on a turned panel costs about what it costs on a flat one.** Until now a rotated region was gathered pixel by pixel in Elixir — a panel row is a column of the app's image, so each row of the patch was assembled with one `binary_part` per pixel — which made a region roughly twice as expensive turned as flat. The raster now samples the bitmap onto its rect in the app's orientation, turns it in one pass with `ExRatatui.Pixels.rotate_rgb8/4` (new in ex_ratatui 0.15), and packs whole panel rows through the format's `rgb_row/4`, which is the same path a flat region already took. On this host one 954×528 XRGB8888 region went from 20.0 ms to 12.4 ms at 90 and from 21.3 ms to 13.6 ms at 270, against 10.4 ms flat; the rotation itself is 0.4 ms of that. On a Raspberry Pi 4 with the Touch Display 2 at `rotate: 90`, the dashboard's Showcase tab went from a 95 ms to a 55 ms median raster per frame. The output is byte for byte what it was, at every angle and every scale. Packing stays in Elixir and is now most of what a region costs, turned or not.
@@ -79,7 +81,8 @@ Nothing breaks for consumers of the documented API. Two things to know:
 - `RasterExRatatui.Telemetry`: surface start/stop, rasterisation and push spans, and input forwarding events.
 - Guides (Building a Surface, Fonts, Pixel Formats, Linux Framebuffers, Telemetry), usage rules, a headless snapshot example, and a rasterisation benchmark.
 
-[Unreleased]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mcass19/raster_ex_ratatui/releases/tag/v0.1.0

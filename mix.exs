@@ -4,7 +4,7 @@ defmodule RasterExRatatui.MixProject do
   @description "Render ExRatatui apps on pixel displays such as e-ink panels and Linux framebuffers"
   @source_url "https://github.com/mcass19/raster_ex_ratatui"
   @changelog_url @source_url <> "/blob/main/CHANGELOG.md"
-  @version "0.2.1"
+  @version "0.3.0"
 
   def project do
     [

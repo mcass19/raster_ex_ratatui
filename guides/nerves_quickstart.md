@@ -11,7 +11,7 @@ mix nerves.new my_device
 Two dependencies in `mix.exs`. `input_event` reads the keyboard and the touch panel; it is a C port that only builds on Linux, so it is the project's dependency, not the library's.
 
 ```elixir
-{:raster_ex_ratatui, "~> 0.2"},
+{:raster_ex_ratatui, "~> 0.3"},
 {:input_event, "~> 1.4", targets: @all_targets}
 ```
 
