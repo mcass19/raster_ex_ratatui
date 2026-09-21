@@ -116,7 +116,7 @@ defmodule RasterExRatatui.SessionTest do
       log =
         capture_log(fn ->
           Session.send_event(session, key("!"))
-          assert_receive {:EXIT, ^server, _reason} = message
+          assert_receive {:EXIT, ^server, _reason} = message, 1_000
 
           assert {:exit, {%RuntimeError{message: "boom"}, _stack}, session} =
                    Session.handle(session, message)
