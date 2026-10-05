@@ -33,6 +33,19 @@ defmodule RasterExRatatui.SurfaceTest do
 
   defp key(code), do: %Key{code: code, kind: "press"}
 
+  # Straight to the runtime, one event at a time (`:sys.get_state/1` waits
+  # until it has handled each), so each event renders on its own: the runtime
+  # merges renders for events that queue up on its side, and the tests using
+  # this are about renders queued on the surface's.
+  defp send_each(surface, codes) do
+    server = Surface.server(surface)
+
+    for code <- codes do
+      send(server, {:ex_ratatui_event, key(code)})
+      :sys.get_state(server)
+    end
+  end
+
   defp pushed_area(patches), do: Enum.sum(Enum.map(patches, &(&1.width * &1.height)))
 
   defp frame(surface), do: surface |> Surface.raster() |> Raster.frame()
@@ -228,7 +241,7 @@ defmodule RasterExRatatui.SurfaceTest do
       assert_receive {:telemetry, _, %{pid: ^surface, diffs: 1}}
       before = frame(surface)
 
-      for code <- ~w(a b c d e), do: Surface.send_event(surface, key(code))
+      send_each(surface, ~w(a b c d e))
       pushes = collect_pushes(400)
 
       batches = for {:telemetry, _, %{pid: ^surface, diffs: n}} <- flush_mailbox(), do: n
@@ -249,8 +262,7 @@ defmodule RasterExRatatui.SurfaceTest do
 
     test "min_interval coalesces renders into one push" do
       surface = start_surface(min_interval: 150)
-      Surface.send_event(surface, key("a"))
-      Surface.send_event(surface, key("b"))
+      send_each(surface, ~w(a b))
 
       assert_receive {:pushed, patches}, 1_000
       refute_receive {:pushed, _}, 300

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Requires ex_ratatui `~> 0.17`. Firmware builds no longer pick up the host's NIF, so the Nerves Quick Start drops the step that deleted it.
+
 ## [0.3.0] - 2026-09-21
 
 ### Changed

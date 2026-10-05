@@ -57,10 +57,9 @@ mix firmware
 mix burn               # the first time; later: mix upload nerves.local
 ```
 
-Three things get in the way:
+Two things get in the way:
 
 - **The Elixir must be built for the system's OTP.** `elixir --version` says "compiled with Erlang/OTP N", and N must be the OTP major of the Nerves system (28 for `nerves_system_rpi4` 2.0.x). A version manager's plain `elixir 1.x` is often an older-OTP build; with mise, `mise use erlang@28 elixir@1.19.4-otp-28` in the project, then `mix local.hex`, `mix local.rebar`, and `mix archive.install hex nerves_bootstrap` for that install.
-- **The host's ex_ratatui NIF.** A host build (`mix test`, `iex -S mix`) downloads the laptop's NIF into `deps/ex_ratatui/priv/native/`, and `mix firmware` then stops in `scrub-otp-release` with "Unexpected executable format". Delete the `x86_64` (or `aarch64-apple-darwin`) `.so` there before building firmware. The other way round, host tests that fail with "Failed to load NIF library" after a firmware build get it back with `MIX_ENV=test mix deps.compile ex_ratatui --force`.
 - **`EX_RATATUI_BUILD`** set in the shell builds the NIF from source for the host; unset it for firmware builds.
 
 ## A panel on its side, and touch

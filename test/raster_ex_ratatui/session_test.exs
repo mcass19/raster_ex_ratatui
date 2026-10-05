@@ -76,10 +76,11 @@ defmodule RasterExRatatui.SessionTest do
       session = start_rendered(raster)
       before = Raster.frame(Session.raster(session))
 
-      for code <- ~w(a b c), do: Session.send_event(session, key(code))
-
+      # One event at a time: the runtime merges renders for events that queue
+      # up on its side, and this test is about renders queued on ours.
       messages =
-        for _ <- 1..3 do
+        for code <- ~w(a b c) do
+          Session.send_event(session, key(code))
           assert_receive {Session, _ref, %Diff{}} = message
           message
         end
