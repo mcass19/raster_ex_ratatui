@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-05
+
 ### Changed
 
 - Requires ex_ratatui `~> 0.17`. Firmware builds no longer pick up the host's NIF, so the Nerves Quick Start drops the step that deleted it.
@@ -85,7 +87,8 @@ Nothing breaks for consumers of the documented API. Two things to know:
 - `RasterExRatatui.Telemetry`: surface start/stop, rasterisation and push spans, and input forwarding events.
 - Guides (Building a Surface, Fonts, Pixel Formats, Linux Framebuffers, Telemetry), usage rules, a headless snapshot example, and a rasterisation benchmark.
 
-[Unreleased]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.1.0...v0.2.0

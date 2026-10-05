@@ -40,7 +40,7 @@ defmodule RpiFramebuffer.MixProject do
       {:nerves_runtime, "~> 0.13.12"},
 
       # The library from this repository (ex_ratatui comes with it). Outside the
-      # repository this is `{:raster_ex_ratatui, "~> 0.1"}`.
+      # repository this is `{:raster_ex_ratatui, "~> 0.3"}`.
       {:raster_ex_ratatui, path: "../.."},
 
       # USB keyboard. Linux only; it compiles on a Linux host too, so the tests run there.
