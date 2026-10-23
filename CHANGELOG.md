@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-23
+
 ### Added
 
 - `PixelFormat.native_format/1`, an optional callback naming the `ExRatatui.Pixels` format whose bytes match the format's `rgb_pixel/6`. `RGB565` returns `:rgb565`, `XRGB8888` `:xrgb8888`, and `Mono` `:mono_bayer4` (its region dither; cells keep the tone rules). `PixelFormat.native_format/2` returns `nil` for a format that does not define it.
@@ -96,7 +98,8 @@ Nothing breaks for consumers of the documented API. Two things to know:
 - `RasterExRatatui.Telemetry`: surface start/stop, rasterisation and push spans, and input forwarding events.
 - Guides (Building a Surface, Fonts, Pixel Formats, Linux Framebuffers, Telemetry), usage rules, a headless snapshot example, and a rasterisation benchmark.
 
-[Unreleased]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/mcass19/raster_ex_ratatui/compare/v0.2.0...v0.2.1
