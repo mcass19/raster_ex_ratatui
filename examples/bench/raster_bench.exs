@@ -157,3 +157,42 @@ end)
 RasterBench.measure("apply/2, 53x22-cell region (954x528 px)", 10, fn ->
   Raster.apply(turned, %Diff{width: cols, height: rows, regions: [still]})
 end)
+
+# Region packing per format, flat and turned: a payload whose only change is
+# one region's bitmap, at the sizes the devices show (the Pi's 696x480 and
+# the FP3's 1080x1000), plus one rendered at half size and scaled up 2x.
+alias RasterExRatatui.PixelFormat.{Mono, RGB565}
+
+IO.puts("\nregions by format (Default6x8, scale 1)")
+
+for {label, {w, h}, {pw, ph}} <- [
+      {"696x480", {116, 60}, {696, 480}},
+      {"696x480 from 348x240", {116, 60}, {348, 240}},
+      {"1080x1000", {180, 125}, {1080, 1000}}
+    ],
+    format <- [RGB565, XRGB8888, Mono],
+    rotate <- [0, 90] do
+  logical = {w * 6, h * 8}
+  size = if rotate == 90, do: {elem(logical, 1), elem(logical, 0)}, else: logical
+  raster = Raster.new(size: size, format: format, rotate: rotate)
+
+  region = fn blue ->
+    %Region{
+      x: 0,
+      y: 0,
+      width: w,
+      height: h,
+      pixel_width: pw,
+      pixel_height: ph,
+      data: gradient.(pw, ph, blue)
+    }
+  end
+
+  {old, new} = {region.(0), region.(255)}
+  {raster, _} = Raster.apply(raster, %Diff{width: w, height: h, ops: [], regions: [old]})
+  name = format |> Module.split() |> List.last()
+
+  RasterBench.measure("#{label} #{name} rotate #{rotate}", 10, fn ->
+    Raster.apply(raster, %Diff{width: w, height: h, regions: [new]})
+  end)
+end

@@ -20,7 +20,9 @@ defmodule RasterExRatatui.PixelFormat do
 
   `c:unpack_row/2` is optional and turns packed pixels back into RGB8, so `RasterExRatatui.Raster.to_png/1` can show what the panel shows.
 
-  `c:rgb_row/4` is optional and packs a whole row of region pixels in one call. The raster prefers it when a format exports it, because regions are the expensive path: one function call per pixel is most of their cost. A format that does not define it gets `rgb_row/5`, the per-pixel fallback, which is exactly what the three built-in formats do in one binary comprehension instead.
+  `c:native_format/1` is optional and names the `t:ExRatatui.Pixels.format/0` whose bytes match the format's `c:rgb_pixel/6`, or `nil`. When a format has one, the raster packs its regions natively with `ExRatatui.Pixels.pack_rgb8/5`: resample, clip, rotate and pack in a single pass, which is how the three built-in formats run.
+
+  `c:rgb_row/4` is optional and packs a whole row of region pixels in one call. For a format without a native format, the raster still resamples, clips and rotates natively and then packs row by row, preferring `c:rgb_row/4` when the format exports it, because one function call per pixel is most of a region's cost. A format that does not define it gets `rgb_row/5`, the per-pixel fallback.
 
   ## Examples
 
@@ -80,7 +82,30 @@ defmodule RasterExRatatui.PixelFormat do
   """
   @callback unpack_row(row :: binary(), config()) :: binary()
 
-  @optional_callbacks rgb_row: 4, unpack_row: 2
+  @doc """
+  The `ExRatatui.Pixels` format these bytes match, or `nil`.
+
+  Optional. A format that returns one must pack every region pixel exactly as `ExRatatui.Pixels.pack_rgb8/5` does for it, at the same panel positions; its `c:rgb_pixel/6` is then only a reference, never called for regions.
+  """
+  @callback native_format(config()) :: ExRatatui.Pixels.format() | nil
+
+  @optional_callbacks rgb_row: 4, unpack_row: 2, native_format: 1
+
+  @doc """
+  The format's `c:native_format/1`, or `nil` when it does not define one.
+
+  ## Examples
+
+      iex> alias RasterExRatatui.PixelFormat
+      iex> PixelFormat.native_format(PixelFormat.RGB565, PixelFormat.RGB565.init([]))
+      :rgb565
+  """
+  @spec native_format(t(), config()) :: ExRatatui.Pixels.format() | nil
+  def native_format(format, config) do
+    Code.ensure_loaded(format)
+
+    if function_exported?(format, :native_format, 1), do: format.native_format(config)
+  end
 
   @doc """
   Packs a row of region pixels with `format`, through its `c:rgb_row/4` when it has one and pixel by pixel through `c:rgb_pixel/6` otherwise.

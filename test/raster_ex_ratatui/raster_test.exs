@@ -11,7 +11,7 @@ defmodule RasterExRatatui.RasterTest do
   alias RasterExRatatui.Font.{Art, Default6x8}
   alias RasterExRatatui.{Grid, Patch, Raster}
   alias RasterExRatatui.PixelFormat.{Mono, RGB565, XRGB8888}
-  alias RasterExRatatui.Test.Rotation
+  alias RasterExRatatui.Test.{RegionReference, Rotation}
 
   doctest Grid
   doctest Patch
@@ -402,6 +402,44 @@ defmodule RasterExRatatui.RasterTest do
       assert binary_part(b.data, 0, 12) == <<7, 8, 9, 10, 12, 13, 14, 15, 17, 18, 19, 20>>
       assert binary_part(b.data, 12 * 3, 12) == binary_part(b.data, 0, 12)
       assert binary_part(b.data, 12 * 4, 12) == <<10, 11, 12, 13, 15, 16, 17, 18, 20, 21, 22, 23>>
+    end
+
+    property "a region patch matches the per-pixel reference, scaled, clipped and turned" do
+      check all(
+              format <- member_of([Mono, RGB565, XRGB8888, RasterExRatatui.Test.Gray]),
+              rotate <- member_of([0, 90, 180, 270]),
+              cols <- integer(2..8),
+              rows <- integer(2..6),
+              margin <- {integer(0..5), integer(0..7)},
+              x <- integer(0..cols),
+              y <- integer(0..rows),
+              width <- integer(1..(cols + 2)),
+              height <- integer(1..(rows + 2)),
+              pixel_width <- integer(1..(width * 6 * 2)),
+              pixel_height <- integer(1..(height * 8 * 2)),
+              data <- binary(length: pixel_width * pixel_height * 3)
+            ) do
+        logical = {cols * 6 + elem(margin, 0), rows * 8 + elem(margin, 1)}
+        size = if rotate in [90, 270], do: {elem(logical, 1), elem(logical, 0)}, else: logical
+        raster = Raster.new(size: size, font: Default6x8, format: format, rotate: rotate)
+        {raster, _} = Raster.apply(raster, full_diff({cols, rows}, []))
+
+        region = %Region{
+          x: x,
+          y: y,
+          width: width,
+          height: height,
+          pixel_width: pixel_width,
+          pixel_height: pixel_height,
+          data: data
+        }
+
+        {_raster, patches} =
+          Raster.apply(raster, %Diff{width: cols, height: rows, regions: [region]})
+
+        assert patches ==
+                 raster |> RegionReference.patch(region) |> List.wrap()
+      end
     end
 
     test "a region hanging past the grid is clipped, and one wholly outside is dropped" do

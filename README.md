@@ -51,7 +51,7 @@ end
 ### Prerequisites
 
 - Elixir 1.17+
-- ex_ratatui 0.15 or later (pixel regions: `CellSession.new/3` with `font_size:`; native bitmap rotation for turned panels)
+- ex_ratatui 0.18 or later (pixel regions: `CellSession.new/3` with `font_size:`; native region packing with `ExRatatui.Pixels.pack_rgb8/5`)
 
 ## Quick start
 

@@ -93,6 +93,18 @@ defmodule RasterExRatatui.PixelFormat.RGB565 do
 
   @impl true
   @doc """
+  `:rgb565`: regions are packed natively by `ExRatatui.Pixels.pack_rgb8/5`, which writes the same bytes as `rgb_pixel/6`.
+
+  ## Examples
+
+      iex> RasterExRatatui.PixelFormat.RGB565.native_format(RasterExRatatui.Palette.new())
+      :rgb565
+  """
+  @spec native_format(Palette.t()) :: :rgb565
+  def native_format(_palette), do: :rgb565
+
+  @impl true
+  @doc """
   The palette's default background.
 
   ## Examples

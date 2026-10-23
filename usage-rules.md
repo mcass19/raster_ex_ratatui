@@ -97,6 +97,7 @@ frame = RasterExRatatui.Raster.frame(raster)
 - `Mono` (gray8, 1-bit panels), `RGB565` (little-endian), `XRGB8888` (little-endian, bytes b, g, r, 255).
 - Colour formats take palette options in `format_opts:` — `:reset_fg`, `:reset_bg`, `:theme` (a partial map of named colours), `:bold_bright`. `Mono` takes `:ink_max`, `:paper_min`.
 - For a Linux framebuffer, pick the format from the device: `{:ok, format} = RasterExRatatui.Framebuffer.format_for(info)`. Do not assume 32 bpp.
+- Regions are packed natively for the built-in formats. A custom `PixelFormat` whose region bytes equal one of `ExRatatui.Pixels`' formats returns it from the optional `native_format/1`; otherwise it implements `rgb_row/4` (the raster still samples and rotates natively). Never pack region pixels in a surface.
 
 ## Fonts
 

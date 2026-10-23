@@ -148,6 +148,18 @@ defmodule RasterExRatatui.PixelFormat.Mono do
 
   @impl true
   @doc """
+  `:mono_bayer4`: regions are dithered natively by `ExRatatui.Pixels.pack_rgb8/5`, with the same luma, matrix and panel anchoring as `rgb_pixel/6`. Cells keep the tone rules.
+
+  ## Examples
+
+      iex> RasterExRatatui.PixelFormat.Mono.native_format(%{})
+      :mono_bayer4
+  """
+  @spec native_format(term()) :: :mono_bayer4
+  def native_format(_config), do: :mono_bayer4
+
+  @impl true
+  @doc """
   Paper.
 
   ## Examples

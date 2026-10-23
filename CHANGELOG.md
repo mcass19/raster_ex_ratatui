@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `PixelFormat.native_format/1`, an optional callback naming the `ExRatatui.Pixels` format whose bytes match the format's `rgb_pixel/6`. `RGB565` returns `:rgb565`, `XRGB8888` `:xrgb8888`, and `Mono` `:mono_bayer4` (its region dither; cells keep the tone rules). `PixelFormat.native_format/2` returns `nil` for a format that does not define it.
+
+### Changed
+
+- **Pixel regions are packed natively.** A region used to be sampled onto its rect, turned, and then packed into the panel's format one row at a time in Elixir, which was most of what a region cost: about 20–30 ns a pixel on a laptop and ~130 on a Raspberry Pi 4. The raster now does all of it in one pass with `ExRatatui.Pixels.pack_rgb8/5` (new in ex_ratatui 0.18), and flat, turned and scaled regions cost the same. On this host a 696×480 RGB565 region went from 8.5 ms to 0.6 ms flat and from 10.3 ms to 0.6 ms turned, and a 1080×1000 XRGB8888 one from 30.5 ms to 2.5 ms. The output is byte for byte what it was, at every angle and scale. A custom format without `native_format/1` still gets the sampling and rotation natively and packs through its `rgb_row/4` (or `rgb_pixel/6`) as before.
+- Requires ex_ratatui `~> 0.18`, for `ExRatatui.Pixels.pack_rgb8/5`.
+
 ## [0.3.1] - 2026-10-05
 
 ### Changed

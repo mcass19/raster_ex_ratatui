@@ -160,6 +160,36 @@ defmodule RasterExRatatui.PixelFormatTest do
     end
   end
 
+  describe "native_format" do
+    test "is nil for a format that does not define it" do
+      assert PixelFormat.native_format(RasterExRatatui.Test.Gray, %{}) == nil
+    end
+
+    property "every built-in's native packing equals its pixels at the same panel positions" do
+      check all(
+              pixels <-
+                list_of({integer(0..255), integer(0..255), integer(0..255)}, min_length: 1),
+              x <- integer(0..7),
+              y <- integer(0..7)
+            ) do
+        row = for {r, g, b} <- pixels, into: <<>>, do: <<r, g, b>>
+        n = length(pixels)
+
+        for {format, config} <- [{Mono, %{}}, {RGB565, Palette.new()}, {XRGB8888, Palette.new()}] do
+          native = PixelFormat.native_format(format, config)
+
+          expected =
+            pixels
+            |> Enum.with_index(x)
+            |> Enum.map_join(fn {{r, g, b}, px} -> format.rgb_pixel(r, g, b, px, y, config) end)
+
+          assert {^expected, ^n, 1} =
+                   ExRatatui.Pixels.pack_rgb8(row, n, 1, native, origin: {x, y})
+        end
+      end
+    end
+  end
+
   describe "RGB formats" do
     property "pack every colour to their width and round-trip within their precision" do
       check all(r <- integer(0..255), g <- integer(0..255), b <- integer(0..255)) do

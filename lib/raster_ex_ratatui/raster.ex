@@ -20,7 +20,7 @@ defmodule RasterExRatatui.Raster do
   `apply/2` rasterises only what changed:
 
     * changed cells, one patch per contiguous run on a row
-    * when the region list changed, one patch per region that is new or whose bitmap or rect changed (the bitmap scaled nearest-neighbour onto its cell rect, clipped to the grid), plus the cells a region that went away no longer covers. A region that is the same as in the previous payload costs nothing, so a still image next to an animated one is rasterised once. Overlapping regions stay correct: an unchanged region that touches a repainted area is repainted too, in list order
+    * when the region list changed, one patch per region that is new or whose bitmap or rect changed (the bitmap scaled nearest-neighbour onto its cell rect, clipped to the grid, in one native pass by `ExRatatui.Pixels.pack_rgb8/5`), plus the cells a region that went away no longer covers. A region that is the same as in the previous payload costs nothing, so a still image next to an animated one is rasterised once. Overlapping regions stay correct: an unchanged region that touches a repainted area is repainted too, in list order
     * on a full payload (the first diff, a snapshot, a resize), every run of cells on every row, every region, and the margins
 
   Cells under a pixel region are never rasterised, on full payloads or diffs: they arrive blank and the region paints over them.
@@ -45,7 +45,7 @@ defmodule RasterExRatatui.Raster do
                         │ C   │
                         └─────┘
 
-  Glyphs are rotated once as they enter the cache; a run of cells becomes a vertical strip; a pixel region's bitmap is turned in one native pass by `ExRatatui.Pixels.rotate_rgb8/4` and then packed row by row, exactly as a flat one is. Dithering and checkerboards stay anchored to the panel's own pixel grid, which is what a 1-bit panel wants.
+  Glyphs are rotated once as they enter the cache; a run of cells becomes a vertical strip; a pixel region's bitmap is sampled, turned and packed in the same native pass as a flat one, so both cost the same. Dithering and checkerboards stay anchored to the panel's own pixel grid, which is what a 1-bit panel wants.
   """
 
   alias ExRatatui.CellSession.{Cell, Diff, Region, Snapshot}
@@ -74,6 +74,7 @@ defmodule RasterExRatatui.Raster do
           grid_size: size(),
           bytes_per_pixel: pos_integer(),
           blank: binary(),
+          native_format: Pixels.format() | nil,
           grid: Grid.t(),
           cache: map()
         }
@@ -103,6 +104,7 @@ defmodule RasterExRatatui.Raster do
     :grid_size,
     :bytes_per_pixel,
     :blank,
+    native_format: nil,
     grid: %Grid{},
     cache: %{}
   ]
@@ -166,7 +168,8 @@ defmodule RasterExRatatui.Raster do
       cell_size: font.cell_size(),
       grid_size: size,
       bytes_per_pixel: format.bytes_per_pixel(config),
-      blank: format.blank(config)
+      blank: format.blank(config),
+      native_format: PixelFormat.native_format(format, config)
     }
     |> geometry(size)
   end
@@ -766,73 +769,40 @@ defmodule RasterExRatatui.Raster do
 
     x0 = region.x * cell_w
     y0 = region.y * cell_h
-    rect_w = min(region.width * cell_w, cols * cell_w - x0)
-    rect_h = min(region.height * cell_h, rows * cell_h - y0)
+    full_w = region.width * cell_w
+    full_h = region.height * cell_h
+    rect_w = min(full_w, cols * cell_w - x0)
+    rect_h = min(full_h, rows * cell_h - y0)
 
     if rect_w > 0 and rect_h > 0 do
       {x, y, width, height} = physical_rect(raster, {x0, y0, rect_w, rect_h})
 
-      # The bitmap is sampled onto its rect in the app's orientation, turned
-      # once by the NIF, and only then packed — so the sampling never has to
-      # know which way the panel is mounted, and the packing always walks
-      # whole panel rows.
-      {rgb, _turned_w, _turned_h} =
-        raster
-        |> region_rgb(region, rect_w, rect_h)
-        |> Pixels.rotate_rgb8(rect_w, rect_h, raster.rotate)
+      # One native pass: the bitmap is sampled onto its full rect in the
+      # app's orientation (so a region cut off at the grid edge samples as if
+      # whole), clipped to the part on the grid, turned, and packed at its
+      # panel position, which anchors the dither to the panel.
+      {data, ^width, ^height} =
+        Pixels.pack_rgb8(
+          region.data,
+          region.pixel_width,
+          region.pixel_height,
+          raster.native_format || :rgb8,
+          scale_to: {full_w, full_h},
+          clip: {rect_w, rect_h},
+          rotate: raster.rotate,
+          origin: {x, y}
+        )
 
-      data = pack_rows(raster, rgb, {x, y, width, height})
+      data =
+        if raster.native_format, do: data, else: pack_rows(raster, data, {x, y, width, height})
+
       %Patch{x: x, y: y, width: width, height: height, data: data}
     end
   end
 
-  # The region's bitmap nearest-neighbour sampled onto its rect, still in
-  # the app's orientation: `rect_w × rect_h` RGB8. A no-op in the usual
-  # case — a session created with the raster's font_size renders its
-  # regions at panel size, so the bitmap already is the rect.
-  defp region_rgb(
-         %__MODULE__{cell_size: {cell_w, cell_h}},
-         %Region{pixel_width: pw, pixel_height: ph} = region,
-         rect_w,
-         rect_h
-       ) do
-    full_w = region.width * cell_w
-    full_h = region.height * cell_h
-
-    if pw == full_w and ph == full_h and rect_w == full_w and rect_h == full_h do
-      region.data
-    else
-      sample(region, {full_w, full_h}, rect_w, rect_h)
-    end
-  end
-
-  # Nearest-neighbour sampling of a bitmap that is not already its rect.
-  # The column offsets into a source row are the same for every row, and
-  # nil when only the rows need picking; an upscaled region repeats source
-  # rows, so each one is gathered once.
-  defp sample(
-         %Region{pixel_width: pw, pixel_height: ph} = region,
-         {full_w, full_h},
-         rect_w,
-         rect_h
-       ) do
-    gather =
-      if pw == full_w and rect_w == full_w,
-        do: nil,
-        else: for(dx <- 0..(rect_w - 1), do: div(dx * pw, full_w) * 3)
-
-    {rows, _last} =
-      Enum.map_reduce(0..(rect_h - 1), {-1, nil}, fn dy, {last_sy, last_row} ->
-        sy = div(dy * ph, full_h)
-        row = if sy == last_sy, do: last_row, else: source_row(region.data, sy, pw, gather)
-        {row, {sy, row}}
-      end)
-
-    IO.iodata_to_binary(rows)
-  end
-
-  # One packed row per panel row of the rect, through the format's row path,
-  # which receives panel coordinates so dithering stays anchored to the panel.
+  # A format without a native layout gets the sampled, turned RGB8 and packs
+  # it one panel row at a time through its row path, which receives panel
+  # coordinates so dithering stays anchored to the panel.
   defp pack_rows(%__MODULE__{format: format, config: config}, rgb, {x, y, width, height}) do
     line = width * 3
 
@@ -842,13 +812,6 @@ defmodule RasterExRatatui.Raster do
       end
 
     IO.iodata_to_binary(rows)
-  end
-
-  defp source_row(data, sy, pw, nil), do: binary_part(data, sy * pw * 3, pw * 3)
-
-  defp source_row(data, sy, pw, gather) do
-    source = binary_part(data, sy * pw * 3, pw * 3)
-    for offset <- gather, into: <<>>, do: binary_part(source, offset, 3)
   end
 
   # -- cells -----------------------------------------------------------------
