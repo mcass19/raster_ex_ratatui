@@ -34,13 +34,13 @@ defmodule RpiFramebuffer.MixProject do
       {:nerves, "~> 1.13", runtime: false},
       {:shoehorn, "~> 0.9.1"},
       {:ring_logger, "~> 0.11.0"},
-      {:toolshed, "~> 0.4.0"},
+      {:toolshed, "~> 0.5.0"},
 
       # Allow Nerves.Runtime on host to support development, testing and CI.
       {:nerves_runtime, "~> 0.13.12"},
 
       # The library from this repository (ex_ratatui comes with it). Outside the
-      # repository this is `{:raster_ex_ratatui, "~> 0.3"}`.
+      # repository this is `{:raster_ex_ratatui, "~> 0.4"}`.
       {:raster_ex_ratatui, path: "../.."},
 
       # USB keyboard. Linux only; it compiles on a Linux host too, so the tests run there.
@@ -55,7 +55,8 @@ defmodule RpiFramebuffer.MixProject do
       # Linux 6.18, where the Touch Display 2 overlay needs the pwm-backlight
       # driver, and their kernel config does not build it (CONFIG_BACKLIGHT_PWM):
       # the DSI panel never finishes probing and /dev/fb0 never appears. HDMI is
-      # not affected. Build with an Elixir compiled for OTP 28 (see the README).
+      # not affected (still true of 2.2.x). Build with an Elixir compiled for
+      # OTP 28 (see the README).
       {:nerves_system_rpi0_2, "~> 2.0.0", runtime: false, targets: :rpi0_2},
       {:nerves_system_rpi3, "~> 2.0.0", runtime: false, targets: :rpi3},
       {:nerves_system_rpi4, "~> 2.0.0", runtime: false, targets: :rpi4},
